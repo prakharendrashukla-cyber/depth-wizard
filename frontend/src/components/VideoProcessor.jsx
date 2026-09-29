@@ -1,3 +1,4 @@
+import { apiFetch } from "../api";
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import "./VideoProcessor.css";
 
@@ -213,23 +214,9 @@ function VideoProcessor({ onVideoProcessed }) {
     const startTime = performance.now();
 
     try {
-      let data = null;
-      try {
-        const response = await fetch("/api/estimate/video", {
-          method: "POST",
-          body: formData,
-        });
-        if (response.ok) {
-          data = await response.json();
-        }
-      } catch (e) {
-        // Network or endpoint missing - will fallback to synthetic pipeline
-      }
-
-      // If backend responded without video frames, generate simulated video DEM
-      if (!data || !data.frames || data.frames.length === 0) {
-        data = await generateSimulatedVideoResult(videoFile.name, maxFrames);
-      }
+      const response = await apiFetch("/estimate/video", { method: "POST", body: formData });
+      const data = await response.json();
+      if (!data.frames?.length) throw new Error("No video frames could be processed");
 
       clearInterval(progressInterval);
       setCurrentProgressFrame(data.total_frames || maxFrames);
@@ -243,9 +230,11 @@ function VideoProcessor({ onVideoProcessed }) {
         onVideoProcessed(data.frames[0]);
       }
     } catch (err) {
+      if (err.status === 401) return;
       clearInterval(progressInterval);
       setError(err.message || "Failed to process video.");
     } finally {
+      clearInterval(progressInterval);
       setIsProcessing(false);
     }
   };

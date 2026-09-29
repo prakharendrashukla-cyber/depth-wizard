@@ -9,9 +9,8 @@
 import React, { useEffect, useRef, useState, useMemo } from "react";
 import "./MapView.css";
 
-// Fallback Leaflet CDN paths in case Leaflet isn't bundled
-const LEAFLET_CSS_URL = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
-const LEAFLET_JS_URL = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 
 // Default center coordinates (ISRO Satellite Centre, Bengaluru)
 const DEFAULT_CENTER = [12.9716, 77.5946];
@@ -92,7 +91,7 @@ export default function MapView({
   const baseLayersRef = useRef({});
 
   // State management
-  const [leafletLoaded, setLeafletLoaded] = useState(typeof window !== "undefined" && !!window.L);
+  const leafletLoaded = true;
   const [cursorCoords, setCursorCoords] = useState(null);
   const [activeOverlay, setActiveOverlay] = useState("depth"); // "depth" | "original" | "none"
   const [overlayOpacity, setOverlayOpacity] = useState(0.85);
@@ -105,48 +104,10 @@ export default function MapView({
   const bounds = useMemo(() => extractBounds(geoData), [geoData]);
   const hasGeoreference = !!bounds;
 
-  // ── 1. Dynamic Leaflet Script & Style Loader ─────────────────────────────
-  useEffect(() => {
-    if (window.L) {
-      setLeafletLoaded(true);
-      return;
-    }
-
-    // Inject CSS
-    if (!document.querySelector(`link[href="${LEAFLET_CSS_URL}"]`)) {
-      const link = document.createElement("link");
-      link.rel = "stylesheet";
-      link.href = LEAFLET_CSS_URL;
-      document.head.appendChild(link);
-    }
-
-    // Inject JS
-    if (!document.querySelector(`script[src="${LEAFLET_JS_URL}"]`)) {
-      const script = document.createElement("script");
-      script.src = LEAFLET_JS_URL;
-      script.async = true;
-      script.onload = () => {
-        if (window.L) setLeafletLoaded(true);
-      };
-      script.onerror = () => setLoadError("Failed to load Leaflet geospatial mapping library.");
-      document.body.appendChild(script);
-    } else {
-      // Script tag exists, poll for window.L
-      const interval = setInterval(() => {
-        if (window.L) {
-          setLeafletLoaded(true);
-          clearInterval(interval);
-        }
-      }, 50);
-      return () => clearInterval(interval);
-    }
-  }, []);
-
   // ── 2. Initialize Leaflet Map Instance ──────────────────────────────────
   useEffect(() => {
     if (!leafletLoaded || !mapContainerRef.current || mapInstanceRef.current) return;
 
-    const L = window.L;
     if (!L) return;
 
     try {
@@ -260,7 +221,6 @@ export default function MapView({
   // ── 4. Update Raster Image Overlay (Depth / Original) ────────────────────
   useEffect(() => {
     const map = mapInstanceRef.current;
-    const L = window.L;
     if (!map || !L) return;
 
     // Remove existing overlay
@@ -307,7 +267,6 @@ export default function MapView({
   useEffect(() => {
     const map = mapInstanceRef.current;
     const gcpGroup = gcpLayerGroupRef.current;
-    const L = window.L;
     if (!map || !gcpGroup || !L) return;
 
     gcpGroup.clearLayers();

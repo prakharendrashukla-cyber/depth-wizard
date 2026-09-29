@@ -1,3 +1,4 @@
+import { apiFetch } from "../api";
 /**
  * Depth Wizard — UncertaintyView Component
  *
@@ -158,7 +159,7 @@ export default function UncertaintyView({
         threshold: threshold,
       };
 
-      const res = await fetch("/api/uncertainty", {
+      const res = await apiFetch("/api/uncertainty", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -178,6 +179,8 @@ export default function UncertaintyView({
         if (onUncertaintyComputed) onUncertaintyComputed(fallback);
       }
     } catch (err) {
+      if (err.status === 401) return;
+      setError(err.message);
       // Client-side fallback computation on network/dev mode
       const fallback = generateSyntheticConfidence(480, 360);
       setUncertaintyData(fallback);

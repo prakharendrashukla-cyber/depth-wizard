@@ -1,3 +1,4 @@
+import { apiFetch } from "../api";
 import React, { useState, useMemo } from "react";
 import "./PDFExport.css";
 
@@ -276,7 +277,7 @@ function PDFExport({ data, scaleFactor = 1.0, model = "Depth Anything V2", isOpe
 
     try {
       setGenerationStep("Calling neural PDF report rendering service...");
-      const response = await fetch("/api/export/pdf", {
+      const response = await apiFetch("/api/export/pdf", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(reportPayload),
@@ -301,6 +302,8 @@ function PDFExport({ data, scaleFactor = 1.0, model = "Depth Anything V2", isOpe
         onClose();
       }
     } catch (err) {
+      if (err.status === 401) return;
+      setError(err.message);
       // If server unreachable, use fallback
       try {
         generateClientFallbackPdf();

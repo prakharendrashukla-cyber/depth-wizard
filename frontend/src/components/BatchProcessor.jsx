@@ -1,3 +1,4 @@
+import { apiFetch } from "../api";
 import React, { useState, useCallback, useMemo, useRef } from "react";
 import "./BatchProcessor.css";
 
@@ -15,7 +16,7 @@ const formatFileSize = (bytes) => {
  * 
  * Multi-image satellite/aerial batch queue processor with drag & drop,
  * per-file status badges, real-time ETA calculation, summary metrics dashboard,
- * sortable comparison table, and batch ZIP archive export.
+ * sortable comparison table, and batch summary export.
  *
  * @param {Object} props
  * @param {Function} props.onBatchComplete - Callback triggered when item is inspected or batch completes: (itemData) => void
@@ -59,7 +60,7 @@ function BatchProcessor({ onBatchComplete }) {
       const newItems = validImages
         .filter((f) => !existingNames.has(f.name))
         .map((f) => ({
-          id: `${f.name}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          id: crypto.randomUUID(),
           file: f,
           previewUrl: URL.createObjectURL(f),
           status: "pending", // 'pending' | 'processing' | 'done' | 'error'
@@ -116,7 +117,7 @@ function BatchProcessor({ onBatchComplete }) {
     setIsProcessing(true);
     setError(null);
     setOverallProgress(0);
-    setEtaSeconds(files.length * 1.5);
+    setEtaSeconds(null);
 
     const generatedJobId = `batch_${Date.now().toString(36)}`;
     setJobId(generatedJobId);
@@ -134,42 +135,22 @@ function BatchProcessor({ onBatchComplete }) {
         prev.map((item, idx) => (idx === i ? { ...item, status: "processing" } : item))
       );
 
-      const itemStartTime = performance.now();
 
       try {
         const formData = new FormData();
         formData.append("image", currentItem.file);
 
-        let data = null;
-        try {
-          const res = await fetch("/api/estimate", {
-            method: "POST",
-            body: formData,
-          });
-          if (res.ok) {
-            data = await res.json();
-          }
-        } catch (e) {
-          // Network failure fallback
-        }
-
-        const elapsedItem = (performance.now() - itemStartTime) / 1000;
-
-        // Fallback synthetic item data if API didn't return full payload
+        const res = await apiFetch("/estimate", { method: "POST", body: formData });
+        const data = await res.json();
         const itemResult = {
-          id: currentItem.id,
-          filename: currentItem.file.name,
-          size_bytes: currentItem.file.size,
-          width: data?.metadata?.original_width || 640,
-          height: data?.metadata?.original_height || 480,
-          num_points: data?.point_cloud?.count || data?.metadata?.num_points || 38400,
-          max_height: data?.height_analysis?.relative_metrics?.peak_elevation || parseFloat((35 + Math.random() * 45).toFixed(1)),
-          relative_relief: data?.height_analysis?.relative_metrics?.relative_relief || parseFloat((25 + Math.random() * 30).toFixed(1)),
-          depth_time_s: data?.metadata?.depth_time_s || parseFloat(elapsedItem.toFixed(2)),
-          depth_map: data?.depth_map || null,
-          original_image: data?.original_image || currentItem.previewUrl,
-          raw_data: data,
-          status: "done",
+          id: currentItem.id, filename: currentItem.file.name, size_bytes: currentItem.file.size,
+          width: data.metadata.original_width, height: data.metadata.original_height,
+          num_points: data.point_cloud.count,
+          max_height: data.height_analysis.relative_metrics.peak_elevation,
+          relative_relief: data.height_analysis.relative_metrics.relative_relief,
+          depth_time_s: data.metadata.depth_time_s,
+          depth_map: data.depth_map, original_image: data.original_image,
+          raw_data: data, status: "done",
         };
 
         processedItems.push(itemResult);
@@ -222,6 +203,7 @@ function BatchProcessor({ onBatchComplete }) {
     };
 
     setBatchResults(summaryData);
+    if (!processedItems.length) setError("No images were processed. See the errors below.");
     setIsProcessing(false);
     setEtaSeconds(null);
   };
@@ -258,47 +240,14 @@ function BatchProcessor({ onBatchComplete }) {
     return filtered;
   }, [batchResults, sortField, sortDirection, searchQuery]);
 
-  // ── Download All ZIP Action ───────────────────────────────────────────────
-  const handleDownloadZip = async () => {
-    if (!jobId && !batchResults) return;
-
-    try {
-      // Attempt backend ZIP endpoint GET /api/batch/{jobId}/download
-      const targetJobId = jobId || "batch_export";
-      const res = await fetch(`/api/batch/${targetJobId}/download`);
-
-      if (res.ok) {
-        const blob = await res.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `depth_wizard_batch_${targetJobId}.zip`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        window.URL.revokeObjectURL(url);
-      } else {
-        // Fallback: create JSON manifest report download
-        const manifest = {
-          job_id: targetJobId,
-          exported_at: new Date().toISOString(),
-          summary: batchResults,
-        };
-        const blob = new Blob([JSON.stringify(manifest, null, 2)], {
-          type: "application/json",
-        });
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `depth_wizard_batch_${targetJobId}_summary.json`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        window.URL.revokeObjectURL(url);
-      }
-    } catch (err) {
-      alert("Error initiating ZIP download: " + err.message);
-    }
+  // ── Download Summary Action ───────────────────────────────────────────────
+  const handleDownloadZip = () => {
+    if (!batchResults) return;
+    const blob = new Blob([JSON.stringify(batchResults, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "depth_wizard_batch_summary.json"; a.click();
+    URL.revokeObjectURL(url);
   };
 
   // Inspect item in 3D Scene
@@ -498,9 +447,9 @@ function BatchProcessor({ onBatchComplete }) {
                 type="button"
                 className="download-zip-btn"
                 onClick={handleDownloadZip}
-                title="Download comprehensive ZIP archive with all depth maps and 3D PLY point clouds"
+                title="Download the actual batch results as JSON"
               >
-                <span>📦 Download All (.ZIP)</span>
+                <span>📦 Download Summary (.JSON)</span>
               </button>
             </div>
           </div>

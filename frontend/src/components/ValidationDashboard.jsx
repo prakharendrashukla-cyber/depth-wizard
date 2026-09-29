@@ -1,3 +1,4 @@
+import { apiFetch } from "../api";
 /**
  * Depth Wizard — ValidationDashboard Component
  *
@@ -173,7 +174,7 @@ export default function ValidationDashboard({
       datasetName: "ISRO Planetary Benchmark (Reference DEM)",
     });
 
-    fetch("/api/benchmarks")
+    apiFetch("/api/benchmarks")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data?.benchmarks && Array.isArray(data.benchmarks)) {
@@ -201,7 +202,7 @@ export default function ValidationDashboard({
           formData.append("estimated_depth_base64", estimatedDepthData.depth_map);
         }
 
-        const res = await fetch("/api/validate", {
+        const res = await apiFetch("/api/validate", {
           method: "POST",
           body: formData,
         });
@@ -221,6 +222,8 @@ export default function ValidationDashboard({
           });
         }
       } catch (err) {
+      if (err.status === 401) return;
+      setError(err.message);
         // Generate robust fallback on connection refusal / dev mode
         const fallbackData = computeSyntheticValidation(scaleFactor, 0.065);
         setValidationResult({

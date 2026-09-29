@@ -1,3 +1,4 @@
+import { apiFetch } from "../api";
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import "./VolumePanel.css";
 
@@ -22,6 +23,7 @@ function VolumePanel({
 }) {
   // ── State ────────────────────────────────────────────────────────────────
   const [sunAzimuth, setSunAzimuth] = useState(135); // 0° to 360° (SE default)
+  const [requestError, setRequestError] = useState(null);
   const [sunElevation, setSunElevation] = useState(35); // 0° to 90° (altitude above horizon)
   const [isComputingShadows, setIsComputingShadows] = useState(false);
   const [isLoadingVolume, setIsLoadingVolume] = useState(false);
@@ -105,11 +107,11 @@ function VolumePanel({
   const fetchVolumeData = useCallback(async () => {
     setIsLoadingVolume(true);
     try {
-      const res = await fetch("/api/volume", {
+      const res = await apiFetch("/api/volume", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          depth_data: depthData?.depth_map || "",
+          depth_map_b64: depthData?.depth_map || "",
           scale_factor: scaleFactor,
           image_width: imageWidth,
           image_height: imageHeight,
@@ -122,7 +124,9 @@ function VolumePanel({
       } else {
         setVolumeData(computedFallbackVolume);
       }
-    } catch {
+    } catch (err) {
+      setRequestError(err.message);
+      if (err.status === 401) return;
       setVolumeData(computedFallbackVolume);
     } finally {
       setIsLoadingVolume(false);
@@ -140,14 +144,14 @@ function VolumePanel({
   const handleComputeShadows = async () => {
     setIsComputingShadows(true);
     try {
-      const res = await fetch("/api/volume/shadow", {
+      const res = await apiFetch("/api/volume/shadow", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          depth_data: depthData?.depth_map || "",
+          depth_map_b64: depthData?.depth_map || "",
           scale_factor: scaleFactor,
-          azimuth: sunAzimuth,
-          elevation: sunElevation,
+          sun_azimuth_deg: sunAzimuth,
+          sun_elevation_deg: sunElevation,
         }),
       });
 
@@ -157,7 +161,9 @@ function VolumePanel({
       } else {
         simulateShadowMap();
       }
-    } catch {
+    } catch (err) {
+      setRequestError(err.message);
+      if (err.status === 401) return;
       simulateShadowMap();
     } finally {
       setIsComputingShadows(false);
@@ -232,7 +238,7 @@ function VolumePanel({
       coverage_percent: coveragePct,
       shadow_area_m2: shadowArea,
       illuminated_area_m2: totalArea - shadowArea,
-      sun_vector: { azimuth: sunAzimuth, elevation: sunElevation },
+      sun_vector: { sun_azimuth_deg: sunAzimuth, sun_elevation_deg: sunElevation },
     });
   }, [sunAzimuth, sunElevation, activeVolume]);
 
@@ -280,6 +286,8 @@ function VolumePanel({
   }, [activeVolume]);
 
   return (
+    <>
+    {requestError && <p role="alert">{requestError}</p>}
     <div className="volume-panel-card">
       {/* ── Header ── */}
       <div className="volume-header">
@@ -665,6 +673,7 @@ function VolumePanel({
         </div>
       </div>
     </div>
+    </>
   );
 }
 

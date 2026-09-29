@@ -1,19 +1,20 @@
-import { useState, useEffect, useCallback } from "react";
+import { apiFetch } from "./api";
+import { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import ImageUpload from "./components/ImageUpload";
-import SceneViewer from "./components/SceneViewer";
+const SceneViewer = lazy(() => import("./components/SceneViewer"));
 import HeightOverlay from "./components/HeightOverlay";
 import GCPCalibration from "./components/GCPCalibration";
-import ContourOverlay from "./components/ContourOverlay";
-import VolumePanel from "./components/VolumePanel";
-import MapView from "./components/MapView";
-import ValidationDashboard from "./components/ValidationDashboard";
-import UncertaintyView from "./components/UncertaintyView";
+const ContourOverlay = lazy(() => import("./components/ContourOverlay"));
+const VolumePanel = lazy(() => import("./components/VolumePanel"));
+const MapView = lazy(() => import("./components/MapView"));
+const ValidationDashboard = lazy(() => import("./components/ValidationDashboard"));
+const UncertaintyView = lazy(() => import("./components/UncertaintyView"));
 import ModelSelector from "./components/ModelSelector";
-import VideoProcessor from "./components/VideoProcessor";
-import BatchProcessor from "./components/BatchProcessor";
-import PDFExport from "./components/PDFExport";
+const VideoProcessor = lazy(() => import("./components/VideoProcessor"));
+const BatchProcessor = lazy(() => import("./components/BatchProcessor"));
+const PDFExport = lazy(() => import("./components/PDFExport"));
 import DemoTour from "./components/DemoTour";
-import SatelliteMetadata from "./components/SatelliteMetadata";
+const SatelliteMetadata = lazy(() => import("./components/SatelliteMetadata"));
 import "./App.css";
 
 // ── Tab Configuration ────────────────────────────────────────────────────
@@ -115,11 +116,11 @@ function App() {
 
   // ── Check backend health on mount ──────────────────────────────────────
   useEffect(() => {
-    fetch("/api/health")
+    apiFetch("/api/health")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         setBackendHealth(data);
-        if (data?.model_id) setCurrentModel(data.model_id);
+        if (data?.model_id && data.model_id !== "loading") setCurrentModel(data.model_id);
       })
       .catch(() => setBackendHealth({ status: "offline", model: "unknown" }));
   }, []);
@@ -133,15 +134,7 @@ function App() {
     setShowCalibration(false);
     setActiveTab("3d");
 
-    // Auto-detect good initial scale for crater images
-    const fname = (file.name || "").toLowerCase();
-    if (fname.includes("crater") || fname.includes("isro") || fname.includes("lunar") || fname.includes("chandrayaan")) {
-      setScaleFactor(250.0);
-    } else if (fname.includes("urban") || fname.includes("city") || fname.includes("drone")) {
-      setScaleFactor(45.0);
-    } else {
-      setScaleFactor(10.0);
-    }
+    setScaleFactor(1.0);
 
     try {
       // Compress huge camera photos in browser (e.g. 20MB -> 150KB) in ~20ms
@@ -153,7 +146,7 @@ function App() {
         formData.append("model", modelOverride || currentModel);
       }
 
-      const res = await fetch("/api/estimate", {
+      const res = await apiFetch("/api/estimate", {
         method: "POST",
         body: formData,
       });
@@ -184,17 +177,11 @@ function App() {
     setShowCalibration(false);
   }, []);
 
-  // ── Video processing complete ──────────────────────────────────────────
-  const handleVideoProcessed = useCallback((videoData) => {
-    setShowVideoProcessor(false);
-    // Could load first frame result into main view
-  }, []);
-
   // ── Demo tour sample loader ────────────────────────────────────────────
   const handleLoadDemoSample = useCallback(async (sampleId) => {
     setShowDemoTour(false);
     try {
-      const res = await fetch(`/api/samples/${sampleId}`);
+      const res = await apiFetch(`/api/samples/${sampleId}`);
       if (!res.ok) return;
       const blob = await res.blob();
       const file = new File([blob], sampleId, { type: blob.type || "image/png" });
@@ -209,7 +196,7 @@ function App() {
     if (!result?.point_cloud) return;
     try {
       setIsExporting(true);
-      const res = await fetch("/api/export/ply", {
+      const res = await apiFetch("/api/export/ply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -249,7 +236,7 @@ function App() {
     if (!result?.height_analysis) return;
     try {
       setIsExporting(true);
-      const res = await fetch("/api/export/report", {
+      const res = await apiFetch("/api/export/report", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -278,6 +265,7 @@ function App() {
 
   // ── Render ─────────────────────────────────────────────────────────────
   return (
+    <Suspense fallback={<p role="status">Loading view…</p>}>
     <div className="app">
       {/* ── Top Header ── */}
       <header className="app-header">
@@ -517,7 +505,7 @@ function App() {
               <h3>📹 Video / Multi-Frame Processor</h3>
               <button className="modal-close" onClick={() => setShowVideoProcessor(false)}>✕</button>
             </div>
-            <VideoProcessor onVideoProcessed={handleVideoProcessed} />
+            <VideoProcessor onVideoProcessed={() => setShowVideoProcessor(false)} />
           </div>
         </div>
       )}
@@ -529,11 +517,12 @@ function App() {
               <h3>📦 Batch Image Processor</h3>
               <button className="modal-close" onClick={() => setShowBatchProcessor(false)}>✕</button>
             </div>
-            <BatchProcessor onBatchComplete={() => setShowBatchProcessor(false)} />
+            <BatchProcessor onBatchComplete={(data) => { setResult(data); setScaleFactor(1); setShowBatchProcessor(false); }} />
           </div>
         </div>
       )}
     </div>
+    </Suspense>
   );
 }
 

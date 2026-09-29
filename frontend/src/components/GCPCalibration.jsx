@@ -1,3 +1,4 @@
+import { apiFetch } from "../api";
 import React, { useState, useRef, useMemo, useCallback } from "react";
 import "./GCPCalibration.css";
 
@@ -196,7 +197,7 @@ function GCPCalibration({
     };
 
     try {
-      const res = await fetch("/api/calibrate", {
+      const res = await apiFetch("/api/calibrate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -211,6 +212,8 @@ function GCPCalibration({
         setCalibrationResult(fallback);
       }
     } catch (err) {
+      if (err.status === 401) return;
+      setErrorMsg(err.message);
       // Offline fallback
       const fallback = computeClientCalibration(gcps);
       setCalibrationResult(fallback);

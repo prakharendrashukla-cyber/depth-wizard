@@ -1,3 +1,4 @@
+import { apiFetch } from "../api";
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import "./ContourOverlay.css";
 
@@ -22,6 +23,7 @@ function ContourOverlay({
 }) {
   // ── State ────────────────────────────────────────────────────────────────
   const [contourInterval, setContourInterval] = useState(10); // in meters
+  const [requestError, setRequestError] = useState(null);
   const [numLevels, setNumLevels] = useState(12); // 5 to 50
   const [showContours, setShowContours] = useState(true);
   const [showSlope, setShowSlope] = useState(false);
@@ -187,11 +189,11 @@ function ContourOverlay({
   const fetchContours = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/contour", {
+      const res = await apiFetch("/api/contour", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          depth_data: depthData?.depth_map || "",
+          depth_map_b64: depthData?.depth_map || "",
           scale_factor: scaleFactor,
           interval: contourInterval,
           num_levels: numLevels,
@@ -203,7 +205,9 @@ function ContourOverlay({
         const data = await res.json();
         setContourData(data);
       }
-    } catch {
+    } catch (err) {
+      setRequestError(err.message);
+      if (err.status === 401) return;
       // Seamlessly falls back to client synthesized contours
     } finally {
       setLoading(false);
@@ -375,6 +379,8 @@ function ContourOverlay({
       : null;
 
   return (
+    <>
+    {requestError && <p role="alert">{requestError}</p>}
     <div className="contour-overlay-card">
       {/* ── Top Header & Controls ── */}
       <div className="contour-header">
@@ -685,6 +691,7 @@ function ContourOverlay({
         )}
       </div>
     </div>
+    </>
   );
 }
 

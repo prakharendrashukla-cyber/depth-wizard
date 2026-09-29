@@ -1,52 +1,37 @@
-const CACHE_NAME = 'depth-wizard-v1';
-const STATIC_ASSETS = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-];
-
-// Install: cache static assets
-self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(STATIC_ASSETS);
-    })
-  );
+const CACHE_NAME = "depth-wizard-v2";
+const ASSETS = ["/", "/index.html", "/manifest.json", "/icons/icon.svg"];
+self.addEventListener("install", event => {
+  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS)));
   self.skipWaiting();
 });
-
-// Activate: clean old caches
-self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((keys) => {
-      return Promise.all(
-        keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
-      );
-    })
-  );
-  self.clients.claim();
+self.addEventListener("activate", event => {
+  event.waitUntil(caches.keys().then(keys => Promise.all(
+    keys.filter(key => key.startsWith("depth-wizard-") && key !== CACHE_NAME).map(key => caches.delete(key))
+  )).then(() => self.clients.claim()));
 });
-
-// Fetch: network-first for API, cache-first for static
-self.addEventListener('fetch', (event) => {
+self.addEventListener("fetch", event => {
   const url = new URL(event.request.url);
-  
-  // Don't cache API calls or POST requests
-  if (url.pathname.startsWith('/api') || event.request.method !== 'GET') {
-    return;
-  }
-  
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const fetchPromise = fetch(event.request).then((response) => {
-        if (response && response.status === 200) {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-        }
-        return response;
-      }).catch(() => cached);
-      
-      return cached || fetchPromise;
-    })
-  );
+  if (event.request.method !== "GET" || url.origin !== self.location.origin) return;
+  const navigation = event.request.mode === "navigate";
+  const staticAsset = url.pathname.startsWith("/assets/") || url.pathname.startsWith("/icons/") ||
+    ["/", "/index.html", "/manifest.json"].includes(url.pathname);
+  if (url.pathname === "/api" || url.pathname.startsWith("/api/") ||
+      (!navigation && !staticAsset)) return;
+  event.respondWith((async () => {
+    const cache = await caches.open(CACHE_NAME);
+    if (!navigation && url.pathname !== "/index.html" && url.pathname !== "/") {
+      const hit = await cache.match(event.request);
+      if (hit) return hit;
+    }
+    try {
+      const response = await fetch(event.request);
+      if (response.ok && (staticAsset || response.headers.get("content-type")?.includes("text/html"))) {
+        await cache.put(event.request, response.clone());
+      }
+      return response;
+    } catch {
+      return await cache.match(event.request) ||
+        (navigation ? await cache.match("/index.html") : null) || Response.error();
+    }
+  })());
 });

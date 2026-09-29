@@ -1,3 +1,4 @@
+import { apiFetch } from "../api";
 import { useCallback, useState, useEffect, useRef } from "react";
 import CameraModal from "./CameraModal";
 import "./ImageUpload.css";
@@ -43,7 +44,7 @@ function ImageUpload({ onUpload, loading, error }) {
 
   // Attempt to load samples from backend
   useEffect(() => {
-    fetch("/api/samples")
+    apiFetch("/api/samples")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data?.samples && data.samples.length > 0) {
@@ -89,7 +90,7 @@ function ImageUpload({ onUpload, loading, error }) {
   const handleSampleClick = async (sample) => {
     try {
       setLoadingSample(sample.id);
-      const res = await fetch(sample.url);
+      const res = await apiFetch(sample.url);
       if (!res.ok) throw new Error("Failed to fetch sample image");
       const blob = await res.blob();
       const file = new File([blob], sample.id, { type: blob.type || "image/png" });

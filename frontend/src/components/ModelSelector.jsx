@@ -1,3 +1,4 @@
+import { apiFetch } from "../api";
 import React, { useState, useEffect, useMemo } from "react";
 import "./ModelSelector.css";
 
@@ -183,7 +184,7 @@ function ModelSelector({ currentModel = "depth_anything_v2_vits", onModelChange,
     let isMounted = true;
     const fetchAvailableModels = async () => {
       try {
-        const res = await fetch("/api/models");
+        const res = await apiFetch("/api/models");
         if (res.ok) {
           const data = await res.json();
           if (isMounted) {
@@ -200,7 +201,7 @@ function ModelSelector({ currentModel = "depth_anything_v2_vits", onModelChange,
           }
         } else {
           // If /api/models is not explicitly implemented, check /health
-          const healthRes = await fetch("/api/health");
+          const healthRes = await apiFetch("/api/health");
           if (healthRes.ok) {
             const healthData = await healthRes.json();
             if (isMounted) {
