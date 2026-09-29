@@ -7,9 +7,9 @@ Also detects unreliable regions (sky, reflective surfaces, uniform areas).
 import io
 import base64
 import logging
-from typing import Dict, Optional, Tuple, Any, List
+from typing import Dict, Any, List
 import numpy as np
-from PIL import Image, ImageFilter, ImageEnhance
+from PIL import Image, ImageEnhance
 
 logger = logging.getLogger(__name__)
 

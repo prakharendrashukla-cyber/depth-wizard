@@ -9,7 +9,7 @@ import base64
 import io
 import logging
 import math
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List
 
 import numpy as np
 from PIL import Image

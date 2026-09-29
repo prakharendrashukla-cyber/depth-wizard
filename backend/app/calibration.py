@@ -7,7 +7,7 @@ Returns calibrated scale factor, R², RMSE, and residuals per point.
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 

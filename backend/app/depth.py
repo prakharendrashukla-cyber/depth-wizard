@@ -13,6 +13,7 @@ Includes auto-model recommendation based on input type.
 
 import logging
 import os
+import threading
 import numpy as np
 from PIL import Image, ImageFilter
 from typing import Optional, List, Dict
@@ -208,6 +209,7 @@ class DepthEstimator:
     """
 
     def __init__(self, model_id: Optional[str] = None):
+        self._lock = threading.RLock()
         self.model = None
         self.model_name = "none"
         self.model_id = "none"
@@ -242,6 +244,13 @@ class DepthEstimator:
         self.model_id = "procedural-fallback"
 
     def load_model(self, model_id: str):
+        with self._lock:
+            candidate = object.__new__(DepthEstimator)
+            candidate.model = candidate.processor = candidate._transform = candidate._device = None
+            candidate._load_model(model_id)
+            self.__dict__.update(candidate.__dict__)
+
+    def _load_model(self, model_id: str):
         """Load a specific model by its registry ID."""
         if model_id not in MODEL_REGISTRY:
             raise ValueError(f"Unknown model: {model_id}. Available: {list(MODEL_REGISTRY.keys())}")
@@ -370,6 +379,10 @@ class DepthEstimator:
     # ── Inference ────────────────────────────────────────────────────
 
     def estimate(self, image: Image.Image) -> np.ndarray:
+        with self._lock:
+            return self._estimate(image)
+
+    def _estimate(self, image: Image.Image) -> np.ndarray:
         """
         Run depth estimation on a PIL Image.
         Returns a float32 array of shape (H, W) with relative depth values

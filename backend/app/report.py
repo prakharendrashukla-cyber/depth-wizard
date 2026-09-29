@@ -9,11 +9,10 @@ Supports ISRO-branded template option.
 from __future__ import annotations
 
 import io
-import os
 import time
 import base64
 import logging
-from typing import Dict, List, Optional, Any, Tuple
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -22,13 +21,12 @@ REPORTLAB_AVAILABLE = False
 try:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
-    from reportlab.lib.units import inch, cm, mm
     from reportlab.platypus import (
         SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-        Image as RLImage, PageBreak, KeepTogether, HRFlowable
+        Image as RLImage, PageBreak
     )
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT, TA_JUSTIFY
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
     from reportlab.pdfgen import canvas
     from reportlab.graphics.shapes import Drawing, Rect, String, Line, PolyLine, Group
     REPORTLAB_AVAILABLE = True
@@ -198,7 +196,7 @@ def _generate_text_fallback_report(report_data: dict, branding: str) -> bytes:
     height = report_data.get("height_analysis", {})
     rel_m = height.get("relative_metrics", {})
     cal_m = height.get("calibrated_metrics", {})
-    raw_s = height.get("raw_stats", {})
+    height.get("raw_stats", {})
     transects = height.get("transects", {})
 
     lines = [
@@ -284,8 +282,8 @@ def generate_pdf_report(report_data: dict, branding: str = "default") -> bytes:
     
     if is_isro:
         c_primary = colors.HexColor("#0B3B60")     # ISRO Navy Blue
-        c_accent = colors.HexColor("#FF9933")      # Indian Saffron
-        c_accent_sub = colors.HexColor("#138808")  # Indian Green
+        colors.HexColor("#FF9933")      # Indian Saffron
+        colors.HexColor("#138808")  # Indian Green
         c_dark = colors.HexColor("#0F172A")
         c_card_bg = colors.HexColor("#F8FAFC")
         c_card_border = colors.HexColor("#E2E8F0")
@@ -294,8 +292,8 @@ def generate_pdf_report(report_data: dict, branding: str = "default") -> bytes:
         c_muted = colors.HexColor("#64748B")
     else:
         c_primary = colors.HexColor("#0969DA")     # Depth Wizard Tech Blue
-        c_accent = colors.HexColor("#58A6FF")      # Light Blue
-        c_accent_sub = colors.HexColor("#BC8CFF")  # Purple
+        colors.HexColor("#58A6FF")      # Light Blue
+        colors.HexColor("#BC8CFF")  # Purple
         c_dark = colors.HexColor("#0D1117")
         c_card_bg = colors.HexColor("#F6F8FA")
         c_card_border = colors.HexColor("#D0D7DE")
@@ -413,7 +411,7 @@ def generate_pdf_report(report_data: dict, branding: str = "default") -> bytes:
     raw_stats = height_res.get("raw_stats", report_data.get("depth_stats", {}))
     rel_metrics = height_res.get("relative_metrics", {})
     cal_metrics = height_res.get("calibrated_metrics", {})
-    histogram = height_res.get("histogram", [])
+    height_res.get("histogram", [])
     transects = height_res.get("transects", {})
     model_name = report_data.get("model_name", meta.get("model", "Depth Anything V2 Small"))
     filename = meta.get("filename", "Input Image")

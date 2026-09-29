@@ -8,7 +8,7 @@ Supports Cartosat / Chandrayaan metadata.
 import io
 import re
 import logging
-from typing import Dict, Optional, Tuple, Any, List, Union
+from typing import Dict, Optional, Tuple, Any, List
 import numpy as np
 from PIL import Image
 

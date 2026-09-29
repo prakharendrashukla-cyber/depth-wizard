@@ -7,7 +7,6 @@ relief histograms, and 3D point cloud PLY exports.
 """
 
 import io
-import struct
 import numpy as np
 
 

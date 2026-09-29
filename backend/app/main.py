@@ -30,18 +30,22 @@ import logging
 import os
 import time
 import asyncio
+import threading
+from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Optional, List
 
 import numpy as np
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Query, Request
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from PIL import Image
 
-from app.depth import DepthEstimator, colorize_depth, list_available_models, recommend_model
+from app.depth import DepthEstimator, colorize_depth, list_available_models
+from app.config import ALLOWED_ORIGINS, MAX_BATCH_FILES, BATCH_LIMIT
+from app.safety import safe_path, read_upload, UploadLimitMiddleware
 from app.mesh import depth_to_point_cloud
 from app.height import analyze_height, generate_ply_file
 
@@ -54,6 +58,8 @@ logger = logging.getLogger(__name__)
 
 # ── Global model reference ───────────────────────────────────────────────
 estimator: DepthEstimator | None = None
+estimator_lock = threading.RLock()
+background_tasks: set[asyncio.Task] = set()
 
 MAX_IMAGE_DIM = 518  # Native Depth Anything V2 patch resolution (37*14=518) for 35% faster inference
 SAMPLE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sample_images")
@@ -62,15 +68,38 @@ SAMPLE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file
 batch_processor = None
 
 
-def get_estimator() -> DepthEstimator:
-    """Retrieve loaded estimator or initialize on demand."""
+def get_estimator(model_id=None) -> DepthEstimator:
+    """Publish only fully loaded models; in-flight callers keep their old snapshot."""
     global estimator
-    if estimator is None:
-        logger.info("Loading depth model...")
-        t0 = time.time()
-        estimator = DepthEstimator()
-        logger.info("Model ready: %s (%.1fs)", estimator.model_name, time.time() - t0)
-    return estimator
+    from app.depth import MODEL_REGISTRY
+    if model_id and model_id not in MODEL_REGISTRY:
+        raise HTTPException(400, "Unknown depth model")
+    with estimator_lock:
+        if estimator is None or (model_id and estimator.model_id != model_id):
+            candidate = DepthEstimator(model_id or os.getenv("DEPTH_MODEL") or None)
+            estimator = candidate
+        return estimator
+
+def track_task(coro):
+    task = asyncio.create_task(coro)
+    background_tasks.add(task)
+    def finished(done):
+        background_tasks.discard(done)
+        if not done.cancelled() and done.exception():
+            logger.error("Background task failed", exc_info=done.exception())
+    task.add_done_callback(finished)
+    return task
+
+async def cleanup_jobs():
+    while True:
+        await asyncio.sleep(60)
+        if batch_processor is not None:
+            batch_processor.cleanup()
+
+def timed_call(fn, *args):
+    started = time.perf_counter()
+    result = fn(*args)
+    return result, time.perf_counter() - started
 
 
 def get_batch_processor():
@@ -85,8 +114,11 @@ def get_batch_processor():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Start loading depth model in background thread without blocking server bind."""
-    asyncio.create_task(asyncio.to_thread(get_estimator))
+    track_task(asyncio.to_thread(get_estimator))
+    cleanup = track_task(cleanup_jobs())
     yield
+    cleanup.cancel()
+    await asyncio.gather(*background_tasks, return_exceptions=True)
     logger.info("Shutting down.")
 
 
@@ -100,17 +132,25 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
+app.add_middleware(UploadLimitMiddleware)
+
+@app.exception_handler(Exception)
+async def unexpected_error(request, exc):
+    logger.error("Unhandled API error", exc_info=exc)
+    return JSONResponse({"detail": "Unable to complete the request"}, status_code=500)
+
 @app.middleware("http")
 async def rewrite_api_prefix(request: Request, call_next):
     """Rewrite /api/* requests so API routes match with or without /api prefix."""
     path = request.url.path
+    request.scope["api_request"] = path == "/api" or path.startswith("/api/")
     if path.startswith("/api/"):
         request.scope["path"] = path[4:]
     elif path == "/api":
@@ -214,8 +254,8 @@ async def list_samples():
 
 @app.get("/samples/{name}")
 async def get_sample_image(name: str):
-    file_path = os.path.join(SAMPLE_DIR, name)
-    if not os.path.exists(file_path):
+    file_path = safe_path(SAMPLE_DIR, name)
+    if not os.path.isfile(file_path):
         raise HTTPException(404, "Sample image not found")
     return FileResponse(file_path)
 
@@ -235,18 +275,8 @@ async def estimate_depth(
       - depth_raw         { min, max, mean }
       - metadata          dimensions, timing, model, etc.
     """
-    est = get_estimator()
-
-    # Switch model if requested
-    if model and model != est.model_id:
-        try:
-            logger.info("Switching model to: %s", model)
-            est.load_model(model)
-        except Exception as exc:
-            logger.warning("Failed to switch model: %s. Using current.", exc)
-
-    # ── Read & decode ────────────────────────────────────────────────
-    raw = await image.read()
+    raw = await read_upload(image)
+    est = await asyncio.to_thread(get_estimator, model)
     img = _decode_image(raw)
 
     # Check for GeoTIFF metadata
@@ -254,7 +284,7 @@ async def estimate_depth(
     try:
         from app.geotiff import parse_geotiff
         geo_result = parse_geotiff(raw)
-        if geo_result.get("is_georeferenced"):
+        if geo_result.get("metadata", {}).get("is_georeferenced"):
             geo_metadata = geo_result.get("metadata")
     except Exception:
         pass
@@ -280,15 +310,12 @@ async def estimate_depth(
         depth = np.array(depth_img, dtype=np.float32)
 
     # ── Fast Parallel Post-Processing ─────────────────────────────────
-    t1 = time.time()
     depth_colored = colorize_depth(depth)
 
     # Run point cloud and height analysis concurrently
-    pc_task = asyncio.to_thread(depth_to_point_cloud, img, depth, 2, 55000)
-    height_task = asyncio.to_thread(analyze_height, depth, 1.0)
-    (positions, colors), height_data = await asyncio.gather(pc_task, height_task)
-
-    pc_time = time.time() - t1
+    pc_task = asyncio.to_thread(timed_call, depth_to_point_cloud, img, depth, 2, 55000)
+    height_task = asyncio.to_thread(timed_call, analyze_height, depth, 1.0)
+    ((positions, colors), pc_time), (height_data, height_time) = await asyncio.gather(pc_task, height_task)
     logger.info("Point cloud & height analysis: %d points in %.2fs", len(positions), pc_time)
 
     # ── Build response ───────────────────────────────────────────────
@@ -304,7 +331,7 @@ async def estimate_depth(
             "num_points": len(positions),
             "depth_time_s": round(depth_time, 3),
             "pointcloud_time_s": round(pc_time, 3),
-            "height_time_s": round(pc_time, 3),
+            "height_time_s": round(height_time, 3),
             "filename": image.filename or "unknown",
         },
         "depth_map": _pil_to_base64(depth_colored, fmt="PNG"),
@@ -348,9 +375,14 @@ async def calibrate(req: CalibrateRequest):
 
         result = calibrate_from_gcps(depth_map, req.gcps)
         return JSONResponse(content=result)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        logger.exception("Invalid request data")
+        raise HTTPException(400, "Invalid input data") from exc
     except Exception as exc:
-        logger.error("Calibration error: %s", exc)
-        raise HTTPException(400, f"Calibration failed: {exc}")
+        logger.exception("Request processing failed")
+        raise HTTPException(500, "Unable to complete the request") from exc
 
 
 # ── Contour Map ──────────────────────────────────────────────────────────
@@ -394,7 +426,6 @@ async def generate_contour(req: ContourRequest):
         aspect_map = slope_aspect.get("aspect_map")
         if aspect_map is not None:
             # Colorize aspect using HSV wheel
-            from PIL import ImageDraw
             aspect_norm = (aspect_map / 360.0 * 255).astype(np.uint8)
             aspect_rgb = np.stack([aspect_norm, np.full_like(aspect_norm, 180), np.full_like(aspect_norm, 200)], axis=-1)
             aspect_b64 = _pil_to_base64(Image.fromarray(aspect_rgb))
@@ -420,9 +451,14 @@ async def generate_contour(req: ContourRequest):
             "image_width": w,
             "image_height": h,
         })
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        logger.exception("Invalid request data")
+        raise HTTPException(400, "Invalid input data") from exc
     except Exception as exc:
-        logger.error("Contour error: %s", exc)
-        raise HTTPException(400, f"Contour generation failed: {exc}")
+        logger.exception("Request processing failed")
+        raise HTTPException(500, "Unable to complete the request") from exc
 
 
 # ── Volume Estimation ────────────────────────────────────────────────────
@@ -445,9 +481,14 @@ async def compute_volume(req: VolumeRequest):
 
         result = estimate_volume(depth_map, scale_factor=req.scale_factor, ground_percentile=req.ground_percentile)
         return JSONResponse(content=result)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        logger.exception("Invalid request data")
+        raise HTTPException(400, "Invalid input data") from exc
     except Exception as exc:
-        logger.error("Volume error: %s", exc)
-        raise HTTPException(400, f"Volume estimation failed: {exc}")
+        logger.exception("Request processing failed")
+        raise HTTPException(500, "Unable to complete the request") from exc
 
 
 class ShadowRequest(BaseModel):
@@ -474,9 +515,14 @@ async def compute_shadow(req: ShadowRequest):
             scale_factor=req.scale_factor,
         )
         return JSONResponse(content=result)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        logger.exception("Invalid request data")
+        raise HTTPException(400, "Invalid input data") from exc
     except Exception as exc:
-        logger.error("Shadow error: %s", exc)
-        raise HTTPException(400, f"Shadow computation failed: {exc}")
+        logger.exception("Request processing failed")
+        raise HTTPException(500, "Unable to complete the request") from exc
 
 
 # ── Uncertainty ──────────────────────────────────────────────────────────
@@ -487,16 +533,21 @@ async def compute_uncertainty(image: UploadFile = File(...)):
     try:
         from app.uncertainty import compute_uncertainty as _compute_uncertainty
 
-        est = get_estimator()
-        raw = await image.read()
+        est = await asyncio.to_thread(get_estimator)
+        raw = await read_upload(image)
         img = _decode_image(raw)
         img = _resize_image(img, MAX_IMAGE_DIM)
 
         result = await asyncio.to_thread(_compute_uncertainty, img, est, num_passes=5)
         return JSONResponse(content=result)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        logger.exception("Invalid request data")
+        raise HTTPException(400, "Invalid input data") from exc
     except Exception as exc:
-        logger.error("Uncertainty error: %s", exc)
-        raise HTTPException(400, f"Uncertainty computation failed: {exc}")
+        logger.exception("Request processing failed")
+        raise HTTPException(500, "Unable to complete the request") from exc
 
 
 # ── Validation ───────────────────────────────────────────────────────────
@@ -515,7 +566,7 @@ async def validate_depth(
 
         est_img = None
         if estimated is not None:
-            est_raw = await estimated.read()
+            est_raw = await read_upload(estimated)
             est_img = Image.open(io.BytesIO(est_raw)).convert("L")
         elif estimated_depth_base64:
             clean_b64 = estimated_depth_base64.split(",")[-1]
@@ -523,7 +574,7 @@ async def validate_depth(
 
         gt_img = None
         if ground_truth is not None:
-            gt_raw = await ground_truth.read()
+            gt_raw = await read_upload(ground_truth)
             gt_img = Image.open(io.BytesIO(gt_raw)).convert("L")
 
         if est_img is None and gt_img is None:
@@ -554,9 +605,14 @@ async def validate_depth(
             "scatterPoints": scatter.get("points", []),
             "histogram": error_heatmap.get("error_histogram", []),
         })
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        logger.exception("Invalid request data")
+        raise HTTPException(400, "Invalid input data") from exc
     except Exception as exc:
-        logger.error("Validation error: %s", exc)
-        raise HTTPException(400, f"Validation failed: {exc}")
+        logger.exception("Request processing failed")
+        raise HTTPException(500, "Unable to complete the request") from exc
 
 
 # ── Video Processing ─────────────────────────────────────────────────────
@@ -564,16 +620,16 @@ async def validate_depth(
 @app.post("/estimate/video")
 async def estimate_video(
     video: UploadFile = File(...),
-    target_fps: float = Form(2.0),
-    max_frames: int = Form(30),
-    temporal_smoothing: float = Form(0.3),
+    target_fps: float = Form(2.0, gt=0, le=30),
+    max_frames: int = Form(30, ge=1, le=120),
+    temporal_smoothing: float = Form(0.3, ge=0, le=1),
 ):
     """Process a video file frame-by-frame with temporal smoothing."""
     try:
         from app.video_processor import process_video
 
-        est = get_estimator()
-        raw = await video.read()
+        est = await asyncio.to_thread(get_estimator)
+        raw = await read_upload(video, video=True)
 
         result = await asyncio.to_thread(
             process_video,
@@ -583,9 +639,14 @@ async def estimate_video(
             temporal_smoothing=temporal_smoothing,
         )
         return JSONResponse(content=result)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        logger.exception("Invalid request data")
+        raise HTTPException(400, "Invalid input data") from exc
     except Exception as exc:
-        logger.error("Video processing error: %s", exc)
-        raise HTTPException(400, f"Video processing failed: {exc}")
+        logger.exception("Request processing failed")
+        raise HTTPException(500, "Unable to complete the request") from exc
 
 
 # ── Export Endpoints ─────────────────────────────────────────────────────
@@ -612,9 +673,14 @@ async def export_ply(req: ExportPlyRequest):
             media_type="application/octet-stream",
             headers={"Content-Disposition": f'attachment; filename="{safe_filename}"'},
         )
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        logger.exception("Invalid request data")
+        raise HTTPException(400, "Invalid input data") from exc
     except Exception as exc:
-        logger.error("Error generating PLY: %s", exc)
-        raise HTTPException(400, f"Failed to generate PLY: {exc}")
+        logger.exception("Request processing failed")
+        raise HTTPException(500, "Unable to complete the request") from exc
 
 
 class ExportReportRequest(BaseModel):
@@ -660,9 +726,14 @@ async def export_pdf(req: ExportPdfRequest):
             media_type="application/pdf",
             headers={"Content-Disposition": 'attachment; filename="depth_wizard_report.pdf"'},
         )
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        logger.exception("Invalid request data")
+        raise HTTPException(400, "Invalid input data") from exc
     except Exception as exc:
-        logger.error("PDF generation error: %s", exc)
-        raise HTTPException(400, f"PDF generation failed: {exc}")
+        logger.exception("Request processing failed")
+        raise HTTPException(500, "Unable to complete the request") from exc
 
 
 # ── Batch Processing ─────────────────────────────────────────────────────
@@ -672,18 +743,23 @@ async def batch_process(images: List[UploadFile] = File(...)):
     """Process multiple images in batch mode."""
     try:
         bp = get_batch_processor()
-        est = get_estimator()
+        est = await asyncio.to_thread(get_estimator)
 
-        # Read all images
+        if len(images) > MAX_BATCH_FILES:
+            raise HTTPException(413, "Too many batch files")
         image_data = []
+        total_bytes = 0
         for img_file in images:
-            raw = await img_file.read()
+            raw = await read_upload(img_file)
+            total_bytes += len(raw)
+            if total_bytes > BATCH_LIMIT:
+                raise HTTPException(413, "Batch exceeds the configured size limit")
             image_data.append((img_file.filename or "unknown", raw))
 
         job_id = bp.create_job(image_data)
 
         # Process in background thread
-        asyncio.create_task(
+        track_task(
             asyncio.to_thread(bp.process_job, job_id, est, analyze_height)
         )
 
@@ -692,9 +768,14 @@ async def batch_process(images: List[UploadFile] = File(...)):
             "status": "processing",
             "total_images": len(image_data),
         })
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        logger.exception("Invalid request data")
+        raise HTTPException(400, "Invalid input data") from exc
     except Exception as exc:
-        logger.error("Batch error: %s", exc)
-        raise HTTPException(400, f"Batch processing failed: {exc}")
+        logger.exception("Request processing failed")
+        raise HTTPException(500, "Unable to complete the request") from exc
 
 
 @app.get("/batch/{job_id}/status")
@@ -708,8 +789,12 @@ async def batch_status(job_id: str):
         return JSONResponse(content=status)
     except HTTPException:
         raise
+    except ValueError as exc:
+        logger.exception("Invalid request data")
+        raise HTTPException(400, "Invalid input data") from exc
     except Exception as exc:
-        raise HTTPException(400, f"Status check failed: {exc}")
+        logger.exception("Request processing failed")
+        raise HTTPException(500, "Unable to complete the request") from exc
 
 
 @app.get("/batch/{job_id}/download")
@@ -727,8 +812,12 @@ async def batch_download(job_id: str):
         )
     except HTTPException:
         raise
+    except ValueError as exc:
+        logger.exception("Invalid request data")
+        raise HTTPException(400, "Invalid input data") from exc
     except Exception as exc:
-        raise HTTPException(400, f"Download failed: {exc}")
+        logger.exception("Request processing failed")
+        raise HTTPException(500, "Unable to complete the request") from exc
 
 
 @app.get("/batch/{job_id}/summary")
@@ -742,8 +831,12 @@ async def batch_summary(job_id: str):
         return JSONResponse(content=summary)
     except HTTPException:
         raise
+    except ValueError as exc:
+        logger.exception("Invalid request data")
+        raise HTTPException(400, "Invalid input data") from exc
     except Exception as exc:
-        raise HTTPException(400, f"Summary failed: {exc}")
+        logger.exception("Request processing failed")
+        raise HTTPException(500, "Unable to complete the request") from exc
 
 
 # ── Single-Server Static Frontend Mounting ──────────────────────────────
@@ -763,15 +856,18 @@ if os.path.isdir(FRONTEND_DIST):
         app.mount("/icons", StaticFiles(directory=icons_dir), name="icons")
 
     @app.get("/{full_path:path}")
-    async def serve_spa_app(full_path: str):
+    async def serve_spa_app(full_path: str, request: Request):
         # Prevent intercepting API routes
-        if full_path.startswith("api/") or full_path == "api":
+        if request.scope.get("api_request") or full_path.split("/")[0] in {"api", "auth", "analyses", "estimate", "export", "batch", "samples", "models", "health", "calibrate", "volume", "contour", "validate", "uncertainty", "benchmarks"}:
             raise HTTPException(404, "API endpoint not found")
 
         # If a static file directly in dist/ matches (e.g. manifest.json, sw.js, favicon.ico)
-        direct_file = os.path.join(FRONTEND_DIST, full_path)
+        direct_file = safe_path(FRONTEND_DIST, full_path)
         if full_path and os.path.isfile(direct_file):
             return FileResponse(direct_file)
+
+        if Path(full_path).suffix:
+            raise HTTPException(404, "Not found")
 
         # Fallback to index.html for React SPA
         index_file = os.path.join(FRONTEND_DIST, "index.html")

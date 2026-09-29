@@ -10,7 +10,7 @@ generates error heatmaps, regression scatter data, and benchmark reference compa
 import io
 import base64
 import logging
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Tuple, Any
 
 import numpy as np
 from PIL import Image
@@ -330,7 +330,7 @@ def generate_scatter_data(
     # Compute linear regression: y = slope * x + intercept, where x = gt, y = pred
     x = gt_sampled.astype(np.float64)
     y = pred_sampled.astype(np.float64)
-    n = len(x)
+    len(x)
 
     x_mean = np.mean(x)
     y_mean = np.mean(y)

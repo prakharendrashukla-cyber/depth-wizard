@@ -7,8 +7,7 @@ Also computes slope (steepness) and aspect (direction) maps from height gradient
 """
 
 import logging
-import math
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -510,18 +509,18 @@ def contours_to_svg(
     levels = contours.get("contour_levels", [])
 
     svg_lines = [
-        f'<?xml version="1.0" encoding="UTF-8"?>',
+        '<?xml version="1.0" encoding="UTF-8"?>',
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}">',
-        f'  <defs>',
-        f'    <style>',
+        '  <defs>',
+        '    <style>',
         f'      .contour-bg {{ fill: {bg_color}; }}',
-        f'      .contour-text {{ fill: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace; font-size: 10px; font-weight: 600; text-shadow: 0 1px 3px rgba(0,0,0,0.8); }}',
-        f'    </style>',
-        f'  </defs>',
-        f'  <!-- Background -->',
+        '      .contour-text { fill: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace; font-size: 10px; font-weight: 600; text-shadow: 0 1px 3px rgba(0,0,0,0.8); }',
+        '    </style>',
+        '  </defs>',
+        '  <!-- Background -->',
         f'  <rect width="{w}" height="{h}" class="contour-bg" />',
-        f'  <!-- Contour Lines -->',
-        f'  <g id="contours" stroke-linecap="round" stroke-linejoin="round">',
+        '  <!-- Contour Lines -->',
+        '  <g id="contours" stroke-linecap="round" stroke-linejoin="round">',
     ]
 
     labels = []

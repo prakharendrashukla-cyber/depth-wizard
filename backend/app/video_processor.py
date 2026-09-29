@@ -10,7 +10,7 @@ import os
 import base64
 import logging
 import tempfile
-from typing import List, Dict, Optional, Callable, Any, Tuple
+from typing import List, Dict, Optional, Any
 import numpy as np
 from PIL import Image
 

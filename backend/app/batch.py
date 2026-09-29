@@ -14,6 +14,8 @@ import base64
 import json
 import uuid
 import logging
+import threading
+from app.config import BATCH_TTL
 from typing import Dict, List, Optional, Callable, Tuple, Any
 
 from PIL import Image
@@ -51,6 +53,7 @@ class BatchJob:
     """
 
     def __init__(self, job_id: str, total_images: int):
+        self.expires_at = float("inf")
         self.job_id: str = job_id
         self.status: str = "pending"  # 'pending', 'processing', 'done', 'error'
         self.total_images: int = total_images
@@ -106,8 +109,16 @@ class BatchProcessor:
     """
 
     def __init__(self):
+        self._lock = threading.RLock()
         self.jobs: Dict[str, BatchJob] = {}
         self._job_images: Dict[str, List[Tuple[str, bytes]]] = {}
+
+    def cleanup(self):
+        with self._lock:
+            for job_id, job in list(self.jobs.items()):
+                if job.expires_at <= time.time():
+                    self.jobs.pop(job_id, None)
+                    self._job_images.pop(job_id, None)
 
     def create_job(self, images: List[Tuple[str, bytes]]) -> str:
         """
@@ -122,6 +133,7 @@ class BatchProcessor:
         if not images:
             raise ValueError("Cannot create a batch job with an empty image list.")
 
+        self.cleanup()
         job_id = str(uuid.uuid4())
         job = BatchJob(job_id=job_id, total_images=len(images))
         self.jobs[job_id] = job
@@ -149,7 +161,8 @@ class BatchProcessor:
             progress_callback: Optional callback invoked after each image is processed.
         """
         if job_id not in self.jobs:
-            raise KeyError(f"Batch job {job_id} not found.")
+            from fastapi import HTTPException
+            raise HTTPException(404, "Job not found")
 
         job = self.jobs[job_id]
         images = self._job_images.get(job_id, [])
@@ -238,7 +251,7 @@ class BatchProcessor:
                     "index": idx,
                     "filename": filename,
                     "status": "error",
-                    "error_message": str(exc),
+                    "error_message": "Unable to process this image",
                     "metadata": {
                         "total_time_s": round(time.time() - t_start, 3),
                     }
@@ -261,6 +274,10 @@ class BatchProcessor:
             job.error_message = "All images in the batch failed to process."
 
         job.completed_at = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
+        job.expires_at = time.time() + BATCH_TTL
+        self._job_images.pop(job_id, None)
+        if progress_callback:
+            progress_callback(job)
         logger.info("Batch job %s finished with status '%s' (%d/%d succeeded).", job_id, job.status, successful_count, len(images))
 
     def get_job_status(self, job_id: str) -> Dict[str, Any]:
@@ -274,7 +291,8 @@ class BatchProcessor:
             Dictionary containing job status and summary.
         """
         if job_id not in self.jobs:
-            raise KeyError(f"Batch job {job_id} not found.")
+            from fastapi import HTTPException
+            raise HTTPException(404, "Job not found")
 
         job = self.jobs[job_id]
         status_dict = job.to_dict(include_images=True)
@@ -295,7 +313,8 @@ class BatchProcessor:
             Dictionary containing aggregate relief, heights, area, timing, and model info.
         """
         if job_id not in self.jobs:
-            raise KeyError(f"Batch job {job_id} not found.")
+            from fastapi import HTTPException
+            raise HTTPException(404, "Job not found")
 
         job = self.jobs[job_id]
         successful = [r for r in job.results if r.get("status") == "success"]
@@ -391,7 +410,8 @@ class BatchProcessor:
             bytes: Binary ZIP data.
         """
         if job_id not in self.jobs:
-            raise KeyError(f"Batch job {job_id} not found.")
+            from fastapi import HTTPException
+            raise HTTPException(404, "Job not found")
 
         job = self.jobs[job_id]
         summary = self.get_summary(job_id)
