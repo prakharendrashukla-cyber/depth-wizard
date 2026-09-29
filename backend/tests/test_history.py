@@ -8,7 +8,7 @@ from app.identity import get_current_user
 def test_history_owner_and_delete(owner):
     raw = io.BytesIO()
     Image.new("RGB", (24,24), "blue").save(raw, format="PNG")
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://localhost") as client:
         response = client.post("/estimate", files={"image": ("scene.png", raw.getvalue(), "image/png")})
         assert response.status_code == 200, response.text
         aid = response.json()["analysis_id"]

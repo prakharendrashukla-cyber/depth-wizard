@@ -1,13 +1,14 @@
 """SQLAlchemy persistence; files live outside the database."""
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 from sqlalchemy import Boolean, DateTime, ForeignKey, JSON, String, create_engine, event, update
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from app.config import BACKEND_DIR
 
 DATA_DIR = BACKEND_DIR / "data"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///" + (DATA_DIR / "depthwizard.db").as_posix())
-UPLOAD_DIR = DATA_DIR / "uploads"
+UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", str(DATA_DIR / "uploads")))
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {})
 SessionLocal = sessionmaker(engine, expire_on_commit=False)
 

@@ -1,6 +1,8 @@
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 BACKEND_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BACKEND_DIR.parent / ".env")
 ALLOWED_ORIGINS = [s.strip() for s in os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:8000").split(",") if s.strip() and s.strip() != "*"]
 IMAGE_LIMIT = int(os.getenv("MAX_IMAGE_MB", "20")) * 1024 * 1024
 VIDEO_LIMIT = int(os.getenv("MAX_VIDEO_MB", "100")) * 1024 * 1024

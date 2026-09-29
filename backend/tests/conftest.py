@@ -3,6 +3,7 @@ import tempfile
 from pathlib import Path
 _TEST_ROOT = tempfile.TemporaryDirectory(prefix="depthwizard-tests-")
 os.environ["DATABASE_URL"] = "sqlite:///" + (Path(_TEST_ROOT.name) / "test.db").as_posix()
+os.environ["SECRET_KEY"] = "test-secret-only-not-for-production-123456789"
 os.environ["DEPTH_MODEL"] = "procedural-fallback"
 import pytest
 from app import analyses
@@ -14,6 +15,8 @@ from app.identity import get_current_user
 
 @pytest.fixture(autouse=True)
 def isolate_db():
+    from app.auth import _attempts
+    _attempts.clear()
     database.Base.metadata.drop_all(database.engine)
     database.init_db()
     yield

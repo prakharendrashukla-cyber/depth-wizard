@@ -47,7 +47,8 @@ from app.depth import DepthEstimator, colorize_depth, list_available_models
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 from app.database import init_db, get_db, User, BatchJobRecord, SessionLocal, now
-from app.identity import get_current_user
+from app.identity import get_current_user, configure_secret, COOKIE_NAME
+from app.auth import router as auth_router, create_first_admin
 from app.analyses import router as analyses_router, save_analysis
 from app.config import ALLOWED_ORIGINS, MAX_BATCH_FILES, BATCH_LIMIT
 from app.safety import safe_path, read_upload, UploadLimitMiddleware
@@ -119,12 +120,14 @@ def get_batch_processor():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Start loading depth model in background thread without blocking server bind."""
+    configure_secret()
     init_db()
+    create_first_admin()
     track_task(asyncio.to_thread(get_estimator))
     cleanup = track_task(cleanup_jobs())
     yield
     cleanup.cancel()
-    await asyncio.gather(*background_tasks, return_exceptions=True)
+    await asyncio.gather(*(task for task in list(background_tasks) if task.get_loop() is asyncio.get_running_loop()), return_exceptions=True)
     logger.info("Shutting down.")
 
 
@@ -145,6 +148,7 @@ app.add_middleware(
 )
 
 
+app.include_router(auth_router)
 app.include_router(analyses_router)
 app.add_middleware(UploadLimitMiddleware)
 
@@ -162,7 +166,15 @@ async def rewrite_api_prefix(request: Request, call_next):
         request.scope["path"] = path[4:]
     elif path == "/api":
         request.scope["path"] = "/"
-    return await call_next(request)
+    if request.method not in {"GET", "HEAD", "OPTIONS"}:
+        origin = request.headers.get("origin")
+        same_origin = str(request.base_url).rstrip("/")
+        if origin and origin not in ALLOWED_ORIGINS and origin != same_origin:
+            return JSONResponse({"detail": "Origin is not allowed"}, status_code=403)
+    response = await call_next(request)
+    if request.scope.get("api_request") or COOKIE_NAME in request.cookies or request.scope["path"].startswith(("/auth", "/analyses")):
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -269,7 +281,7 @@ async def get_sample_image(name: str):
 
 # ── Core Depth Estimation ────────────────────────────────────────────────
 
-@app.post("/estimate")
+@app.post("/estimate", dependencies=[Depends(get_current_user)])
 async def estimate_depth(
     image: UploadFile = File(...),
     model: Optional[str] = Form(None),
@@ -372,7 +384,7 @@ class CalibrateRequest(BaseModel):
     gcps: List[dict]  # [{x, y, known_height_m}]
 
 
-@app.post("/calibrate")
+@app.post("/calibrate", dependencies=[Depends(get_current_user)])
 async def calibrate(req: CalibrateRequest):
     """Calibrate depth map using Ground Control Points."""
     try:
@@ -404,7 +416,7 @@ class ContourRequest(BaseModel):
     format: str = "json"  # "json", "svg", "dxf"
 
 
-@app.post("/contour")
+@app.post("/contour", dependencies=[Depends(get_current_user)])
 async def generate_contour(req: ContourRequest):
     """Generate contour lines and slope/aspect maps from depth data."""
     try:
@@ -479,7 +491,7 @@ class VolumeRequest(BaseModel):
     ground_percentile: float = 10.0
 
 
-@app.post("/volume")
+@app.post("/volume", dependencies=[Depends(get_current_user)])
 async def compute_volume(req: VolumeRequest):
     """Estimate volume above ground from depth map."""
     try:
@@ -508,7 +520,7 @@ class ShadowRequest(BaseModel):
     scale_factor: float = 1.0
 
 
-@app.post("/volume/shadow")
+@app.post("/volume/shadow", dependencies=[Depends(get_current_user)])
 async def compute_shadow(req: ShadowRequest):
     """Compute shadow map from height data and sun position."""
     try:
@@ -537,7 +549,7 @@ async def compute_shadow(req: ShadowRequest):
 
 # ── Uncertainty ──────────────────────────────────────────────────────────
 
-@app.post("/uncertainty")
+@app.post("/uncertainty", dependencies=[Depends(get_current_user)])
 async def compute_uncertainty(image: UploadFile = File(...)):
     """Compute per-pixel uncertainty/confidence map using multi-pass augmented inference."""
     try:
@@ -562,7 +574,7 @@ async def compute_uncertainty(image: UploadFile = File(...)):
 
 # ── Validation ───────────────────────────────────────────────────────────
 
-@app.post("/validate")
+@app.post("/validate", dependencies=[Depends(get_current_user)])
 async def validate_depth(
     estimated: Optional[UploadFile] = File(None),
     ground_truth: Optional[UploadFile] = File(None),
@@ -627,7 +639,7 @@ async def validate_depth(
 
 # ── Video Processing ─────────────────────────────────────────────────────
 
-@app.post("/estimate/video")
+@app.post("/estimate/video", dependencies=[Depends(get_current_user)])
 async def estimate_video(
     video: UploadFile = File(...),
     target_fps: float = Form(2.0, gt=0, le=30),
@@ -667,7 +679,7 @@ class ExportPlyRequest(BaseModel):
     filename: str = "point_cloud.ply"
 
 
-@app.post("/export/ply")
+@app.post("/export/ply", dependencies=[Depends(get_current_user)])
 async def export_ply(req: ExportPlyRequest):
     """Convert base64 point cloud positions & colors to a binary PLY file."""
     try:
@@ -700,7 +712,7 @@ class ExportReportRequest(BaseModel):
     scale_factor: float = 1.0
 
 
-@app.post("/export/report")
+@app.post("/export/report", dependencies=[Depends(get_current_user)])
 async def export_report(req: ExportReportRequest):
     """Generate a structured analysis report download."""
     report = {
@@ -724,7 +736,7 @@ class ExportPdfRequest(BaseModel):
     branding: str = "default"  # "default" or "isro"
 
 
-@app.post("/export/pdf")
+@app.post("/export/pdf", dependencies=[Depends(get_current_user)])
 async def export_pdf(req: ExportPdfRequest):
     """Generate a professional PDF report."""
     try:
@@ -748,7 +760,7 @@ async def export_pdf(req: ExportPdfRequest):
 
 # ── Batch Processing ─────────────────────────────────────────────────────
 
-@app.post("/batch")
+@app.post("/batch", dependencies=[Depends(get_current_user)])
 async def batch_process(images: List[UploadFile] = File(...), user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Process multiple images in batch mode."""
     try:

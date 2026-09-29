@@ -1,3 +1,5 @@
+import { useAuth } from "./AuthContext";
+const AnalysisHistory = lazy(() => import("./components/AnalysisHistory"));
 import { apiFetch } from "./api";
 import { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import ImageUpload from "./components/ImageUpload";
@@ -93,6 +95,9 @@ async function compressImageForUpload(file) {
 }
 
 function App() {
+  const { user, logout } = useAuth();
+  const [showHistory, setShowHistory] = useState(false);
+  const [logoutError, setLogoutError] = useState("");
   // ── Core state ─────────────────────────────────────────────────────────
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -278,6 +283,10 @@ function App() {
             Single-View Monocular Height Estimation · 3D Reconstruction · Geospatial Intelligence
           </p>
           <div className="header-actions">
+            <span style={{ overflowWrap: "anywhere" }}>{user.email}</span>
+            <button className="header-btn" onClick={() => setShowHistory(true)}>My Analyses</button>
+            <button className="header-btn" onClick={() => logout().catch(err => setLogoutError(err.message))}>Logout</button>
+            {logoutError && <span role="alert">{logoutError}</span>}
             {backendHealth && (
               <div className="backend-badge">
                 <span className={`status-dot ${backendHealth.status === "ok" ? "online" : "offline"}`} />
@@ -479,6 +488,9 @@ function App() {
         )}
       </main>
 
+      {showHistory && <AnalysisHistory onClose={() => setShowHistory(false)} onOpen={data => {
+        setResult(data); setScaleFactor(1); setActiveTab("3d"); setShowHistory(false);
+      }} />}
       {/* ── Modals & Overlays ── */}
       {showPdfExport && (
         <PDFExport

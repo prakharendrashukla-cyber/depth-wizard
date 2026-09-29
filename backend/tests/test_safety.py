@@ -16,7 +16,7 @@ from app.batch import BatchProcessor
 
 @pytest.fixture
 def client(owner):
-    with TestClient(main.app, raise_server_exceptions=False) as client:
+    with TestClient(main.app, base_url="http://localhost", raise_server_exceptions=False) as client:
         yield client
 
 def png():
