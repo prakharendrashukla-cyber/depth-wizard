@@ -1,0 +1,31 @@
+{
+  "name": "Depth Wizard",
+  "short_name": "DepthWiz",
+  "description": "Single-View Height Estimation & 3D Flythrough — Built for SIH 2026 / ISRO",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#080a10",
+  "theme_color": "#58a6ff",
+  "orientation": "any",
+  "categories": ["utilities", "productivity"],
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

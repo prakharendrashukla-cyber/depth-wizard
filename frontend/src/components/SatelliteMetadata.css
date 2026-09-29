@@ -1,0 +1,792 @@
+/* ── SatelliteMetadata Dark Theme Stylesheet ─────────────────────────────── */
+
+.satellite-meta-card {
+  background: #161b22;
+  border: 1px solid #21262d;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+  color: #c9d1d9;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.satellite-meta-card:hover {
+  border-color: #30363d;
+}
+
+/* ── Card Header ─────────────────────────────────────────────────────────── */
+.sat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.25rem;
+  background: #161b22;
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 1px solid #21262d;
+  gap: 12px;
+  flex-wrap: wrap;
+  transition: background 0.15s ease;
+}
+
+.sat-header:hover {
+  background: #1c2128;
+}
+
+.sat-title-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sat-icon-badge {
+  font-size: 1.6rem;
+  line-height: 1;
+  filter: drop-shadow(0 0 6px rgba(88, 166, 255, 0.4));
+}
+
+.sat-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.sat-main-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #f0f6fc;
+  letter-spacing: -0.01em;
+}
+
+.sat-subtitle {
+  margin: 2px 0 0 0;
+  font-size: 0.76rem;
+  color: #8b949e;
+}
+
+.sat-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  letter-spacing: 0.02em;
+}
+
+.sat-badge-real {
+  background: rgba(63, 185, 80, 0.15);
+  border: 1px solid #3fb950;
+  color: #3fb950;
+}
+
+.sat-badge-preset {
+  background: rgba(188, 140, 255, 0.15);
+  border: 1px solid #bc8cff;
+  color: #bc8cff;
+}
+
+.sat-badge-uncalibrated {
+  background: rgba(139, 148, 158, 0.15);
+  border: 1px solid #484f58;
+  color: #8b949e;
+}
+
+.sat-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sat-mini-toggle-btn {
+  background: rgba(255, 153, 51, 0.1);
+  border: 1px solid rgba(255, 153, 51, 0.3);
+  color: #ff9933;
+  border-radius: 14px;
+  padding: 4px 10px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.sat-mini-toggle-btn.active {
+  background: rgba(255, 153, 51, 0.2);
+  border-color: #ff9933;
+  color: #ffffff;
+}
+
+.sat-collapse-btn {
+  background: transparent;
+  border: 1px solid #30363d;
+  color: #8b949e;
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.sat-collapse-btn:hover {
+  border-color: #58a6ff;
+  color: #58a6ff;
+}
+
+.chevron-icon {
+  font-size: 0.7rem;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  display: inline-block;
+}
+
+.chevron-icon.open {
+  transform: rotate(0deg);
+}
+
+.chevron-icon:not(.open) {
+  transform: rotate(-90deg);
+}
+
+/* ── Collapsible Body ────────────────────────────────────────────────────── */
+.sat-body {
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  background: #0d1117;
+  animation: satBodySlide 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes satBodySlide {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── 1. ISRO & SIH 2026 Branding Ribbon ─────────────────────────────────── */
+.isro-branding-section {
+  background: #161b22;
+  border: 1px solid #21262d;
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Tricolor Strip: Saffron (#FF9933), White (#FFFFFF), Green (#138808) */
+.isro-tricolor-strip {
+  height: 4px;
+  width: 100%;
+  background: linear-gradient(
+    90deg,
+    #ff9933 0%,
+    #ff9933 33.33%,
+    #ffffff 33.33%,
+    #ffffff 66.66%,
+    #138808 66.66%,
+    #138808 100%
+  );
+}
+
+.isro-branding-content {
+  padding: 0.9rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.isro-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.sih-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: linear-gradient(135deg, rgba(255, 153, 51, 0.2), rgba(19, 136, 8, 0.2));
+  border: 1px solid rgba(255, 153, 51, 0.4);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #f0f6fc;
+}
+
+.sih-icon {
+  font-size: 0.9rem;
+}
+
+.isro-ps-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.74rem;
+}
+
+.isro-tag-label {
+  color: #ff9933;
+  font-weight: 600;
+}
+
+.isro-tag-val {
+  color: #c9d1d9;
+  font-weight: 500;
+}
+
+.isro-team-info {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 6px 16px;
+  padding-top: 4px;
+  border-top: 1px dashed #21262d;
+}
+
+.isro-info-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.74rem;
+}
+
+.isro-label {
+  color: #8b949e;
+}
+
+.isro-value {
+  color: #c9d1d9;
+  font-weight: 600;
+}
+
+/* ── 2. Processing Pipeline Diagram ─────────────────────────────────────── */
+.sat-pipeline-section {
+  background: #161b22;
+  border: 1px solid #21262d;
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pipeline-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pipeline-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #f0f6fc;
+}
+
+.pipeline-total-latency {
+  font-size: 0.75rem;
+  color: #8b949e;
+}
+
+.pipeline-total-latency strong {
+  color: #3fb950;
+}
+
+.sat-pipeline-flow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.pipeline-box {
+  flex: 1;
+  min-width: 140px;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.pipeline-box:hover {
+  border-color: #58a6ff;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.pipeline-box-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.pipeline-step-badge {
+  font-size: 0.65rem;
+  font-weight: 800;
+  color: #58a6ff;
+  font-family: monospace;
+}
+
+.pipeline-stage-tag {
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #8b949e;
+  background: #161b22;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.pipeline-box-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pipeline-box-icon {
+  font-size: 1.3rem;
+  line-height: 1;
+}
+
+.pipeline-box-info {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pipeline-box-name {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #f0f6fc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pipeline-box-sub {
+  font-size: 0.66rem;
+  color: #8b949e;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pipeline-box-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-top: 1px solid #21262d;
+  padding-top: 4px;
+  margin-top: 2px;
+}
+
+.pipeline-time-badge {
+  font-size: 0.68rem;
+  color: #58a6ff;
+  font-family: monospace;
+  font-weight: 600;
+}
+
+.pipeline-status-badge {
+  font-size: 0.62rem;
+  color: #3fb950;
+  font-weight: 600;
+}
+
+/* Arrow Connector */
+.pipeline-arrow-connector {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  color: #58a6ff;
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
+
+.arrow-line {
+  width: 8px;
+  height: 2px;
+  background: #30363d;
+  margin-right: -2px;
+}
+
+.arrow-head {
+  color: #58a6ff;
+  animation: pulseArrow 2s infinite ease-in-out;
+}
+
+@keyframes pulseArrow {
+  0%, 100% { opacity: 0.6; transform: translateX(0); }
+  50% { opacity: 1; transform: translateX(2px); }
+}
+
+/* ── 3. Metadata Grid ────────────────────────────────────────────────────── */
+.sat-metadata-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
+}
+
+.sat-meta-block {
+  background: #161b22;
+  border: 1px solid #21262d;
+  border-radius: 10px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.meta-block-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid #21262d;
+  padding-bottom: 6px;
+}
+
+.block-icon {
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.meta-block-header h4 {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #f0f6fc;
+}
+
+.meta-block-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.meta-field {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.78rem;
+  gap: 8px;
+}
+
+.field-label {
+  color: #8b949e;
+  flex-shrink: 0;
+}
+
+.field-value {
+  color: #f0f6fc;
+  font-weight: 500;
+  text-align: right;
+  word-break: break-word;
+}
+
+.highlight-blue {
+  color: #58a6ff;
+  font-weight: 600;
+}
+
+.highlight-green {
+  color: #3fb950;
+  font-weight: 600;
+  font-family: monospace;
+}
+
+.highlight-purple {
+  color: #bc8cff;
+  font-weight: 600;
+}
+
+.highlight-yellow {
+  color: #d29922;
+  font-weight: 600;
+}
+
+/* Solar condition badge */
+.solar-condition-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  font-size: 0.72rem;
+  color: #c9d1d9;
+  margin-top: 4px;
+}
+
+.solar-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+/* Bounds subcard */
+.bounds-subcard {
+  background: #0d1117;
+  border: 1px solid #21262d;
+  border-radius: 8px;
+  padding: 8px;
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bounds-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.bounds-title {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #8b949e;
+}
+
+.copy-bounds-btn {
+  background: transparent;
+  border: 1px solid #30363d;
+  color: #58a6ff;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 0.68rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.copy-bounds-btn:hover {
+  background: rgba(88, 166, 255, 0.15);
+  border-color: #58a6ff;
+}
+
+.bounds-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+}
+
+.bound-point {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  font-family: monospace;
+}
+
+.pt-tag {
+  color: #8b949e;
+}
+
+.pt-val {
+  color: #c9d1d9;
+}
+
+/* ── 4. Placeholder Card (When no GeoTIFF is provided) ───────────────────── */
+.sat-placeholder-card {
+  background: #161b22;
+  border: 1px dashed #30363d;
+  border-radius: 10px;
+  padding: 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.placeholder-icon-box {
+  width: 52px;
+  height: 52px;
+  border-radius: 10px;
+  background: #0d1117;
+  border: 1px solid #21262d;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.placeholder-icon {
+  font-size: 1.8rem;
+  line-height: 1;
+}
+
+.placeholder-text-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+
+.placeholder-title {
+  margin: 0;
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: #f0f6fc;
+}
+
+.placeholder-desc {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #8b949e;
+  line-height: 1.45;
+}
+
+.placeholder-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.preset-explore-btn {
+  background: rgba(188, 140, 255, 0.12);
+  border: 1px solid rgba(188, 140, 255, 0.3);
+  color: #bc8cff;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.preset-explore-btn:hover {
+  background: #bc8cff;
+  color: #080a10;
+  box-shadow: 0 2px 10px rgba(188, 140, 255, 0.3);
+}
+
+.preset-explore-btn.secondary {
+  background: rgba(88, 166, 255, 0.12);
+  border-color: rgba(88, 166, 255, 0.3);
+  color: #58a6ff;
+}
+
+.preset-explore-btn.secondary:hover {
+  background: #58a6ff;
+  color: #080a10;
+  box-shadow: 0 2px 10px rgba(88, 166, 255, 0.3);
+}
+
+/* ── 5. Preset Selector Bar ──────────────────────────────────────────────── */
+.preset-selector-bar {
+  background: #161b22;
+  border: 1px solid #21262d;
+  border-radius: 8px;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.preset-bar-title {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: #8b949e;
+}
+
+.preset-pill-group {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.preset-pill-btn {
+  background: #0d1117;
+  border: 1px solid #30363d;
+  color: #c9d1d9;
+  border-radius: 12px;
+  padding: 4px 10px;
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.preset-pill-btn:hover {
+  border-color: #58a6ff;
+  color: #58a6ff;
+}
+
+.preset-pill-btn.active {
+  background: rgba(188, 140, 255, 0.15);
+  border-color: #bc8cff;
+  color: #bc8cff;
+  font-weight: 600;
+}
+
+.preset-dismiss-btn {
+  background: transparent;
+  border: 1px solid #30363d;
+  color: #8b949e;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 0.7rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.preset-dismiss-btn:hover {
+  color: #f85149;
+  border-color: #f85149;
+}
+
+/* ── Responsive Rules ────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .sat-header {
+    padding: 0.85rem 1rem;
+  }
+
+  .sat-body {
+    padding: 1rem;
+  }
+
+  .sat-pipeline-flow {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .pipeline-arrow-connector {
+    transform: rotate(90deg);
+    padding: 6px 0;
+  }
+
+  .sat-metadata-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sat-placeholder-card {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .placeholder-actions {
+    justify-content: center;
+  }
+}

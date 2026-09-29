@@ -1,0 +1,170 @@
+"""
+Height Estimation and 3D Export Module for Depth Wizard.
+
+Computes relative and calibrated physical height metrics from depth maps,
+including ground-plane baseline detection, elevation profiles (transects),
+relief histograms, and 3D point cloud PLY exports.
+"""
+
+import io
+import struct
+import numpy as np
+
+
+def analyze_height(
+    depth: np.ndarray,
+    scale_factor: float = 1.0,
+    num_transect_samples: int = 100,
+) -> dict:
+    """
+    Analyze depth map to estimate terrain/structure heights, relief, and profiles.
+
+    Args:
+        depth: 2D numpy array (H, W) of relative depth (higher = closer/elevated).
+        scale_factor: Calibration multiplier (e.g., meters per relative unit).
+        num_transect_samples: Number of sample points along cross-section lines.
+
+    Returns:
+        Dictionary containing relief statistics, histogram, and cross-section profiles.
+    """
+    h, w = depth.shape
+    d = depth.astype(np.float32)
+
+    # Normalize depth map to [0, 1] for relative height analysis
+    d_min = float(d.min())
+    d_max = float(d.max())
+    span = d_max - d_min if (d_max - d_min) > 1e-6 else 1.0
+    norm_height = (d - d_min) / span  # 0 = lowest ground / far, 1 = highest peak / close
+
+    # Ground baseline estimation (using 10th percentile as robust ground plane)
+    ground_baseline_norm = float(np.percentile(norm_height, 10))
+    peak_norm = float(np.percentile(norm_height, 99))
+    relative_relief = max(0.0, peak_norm - ground_baseline_norm)
+
+    # Statistical metrics
+    mean_norm = float(np.mean(norm_height))
+    median_norm = float(np.median(norm_height))
+    std_norm = float(np.std(norm_height))
+
+    # Calculate 20-bin histogram for elevation distribution
+    hist_counts, bin_edges = np.histogram(norm_height, bins=20, range=(0.0, 1.0))
+    histogram = [
+        {
+            "bin_start": round(float(bin_edges[i]), 3),
+            "bin_end": round(float(bin_edges[i + 1]), 3),
+            "count": int(hist_counts[i]),
+            "percentage": round(float(hist_counts[i] / norm_height.size * 100), 2),
+        }
+        for i in range(len(hist_counts))
+    ]
+
+    # Cross-sectional transects (elevation profiles)
+    # Horizontal middle slice
+    mid_row = h // 2
+    x_indices = np.linspace(0, w - 1, num_transect_samples, dtype=int)
+    h_profile = norm_height[mid_row, x_indices]
+
+    # Vertical middle slice
+    mid_col = w // 2
+    y_indices = np.linspace(0, h - 1, num_transect_samples, dtype=int)
+    v_profile = norm_height[y_indices, mid_col]
+
+    # Diagonal slice (top-left to bottom-right)
+    diag_profile = norm_height[
+        np.linspace(0, h - 1, num_transect_samples, dtype=int),
+        np.linspace(0, w - 1, num_transect_samples, dtype=int),
+    ]
+
+    # Structure density (% of area significantly above ground baseline)
+    elevated_mask = norm_height > (ground_baseline_norm + 0.2 * relative_relief)
+    building_coverage_pct = float(np.mean(elevated_mask) * 100)
+
+    return {
+        "raw_stats": {
+            "min_depth": d_min,
+            "max_depth": d_max,
+            "mean_depth": float(np.mean(d)),
+            "std_depth": float(np.std(d)),
+        },
+        "relative_metrics": {
+            "ground_baseline": round(ground_baseline_norm, 4),
+            "peak_elevation": round(peak_norm, 4),
+            "relative_relief": round(relative_relief, 4),
+            "mean_elevation": round(mean_norm, 4),
+            "median_elevation": round(median_norm, 4),
+            "elevation_std": round(std_norm, 4),
+            "elevated_coverage_percent": round(building_coverage_pct, 2),
+        },
+        "calibrated_metrics": {
+            "scale_factor_meters": scale_factor,
+            "max_height_m": round(relative_relief * scale_factor, 2),
+            "mean_height_m": round(mean_norm * scale_factor, 2),
+            "ground_level_m": round(ground_baseline_norm * scale_factor, 2),
+            "peak_level_m": round(peak_norm * scale_factor, 2),
+            "total_span_m": round(1.0 * scale_factor, 2),
+        },
+        "histogram": histogram,
+        "transects": {
+            "horizontal": [round(float(val), 4) for val in h_profile],
+            "vertical": [round(float(val), 4) for val in v_profile],
+            "diagonal": [round(float(val), 4) for val in diag_profile],
+        },
+    }
+
+
+def generate_ply_file(positions: np.ndarray, colors: np.ndarray) -> bytes:
+    """
+    Generate binary little-endian PLY format file from 3D positions and colors.
+
+    Args:
+        positions: (N, 3) float32 coordinates [x, y, z].
+        colors: (N, 3) float32 RGB values in range [0, 1].
+
+    Returns:
+        bytes: Binary PLY data.
+    """
+    num_points = len(positions)
+    if num_points == 0:
+        return b"ply\nformat ascii 1.0\nelement vertex 0\nend_header\n"
+
+    # Header
+    header = (
+        f"ply\n"
+        f"format binary_little_endian 1.0\n"
+        f"comment Generated by Depth Wizard\n"
+        f"element vertex {num_points}\n"
+        f"property float x\n"
+        f"property float y\n"
+        f"property float z\n"
+        f"property uchar red\n"
+        f"property uchar green\n"
+        f"property uchar blue\n"
+        f"end_header\n"
+    ).encode("ascii")
+
+    # Vertex buffer: pack float32 x, y, z + uint8 r, g, b
+    # Convert colors to uint8 [0, 255]
+    colors_uint8 = np.clip(colors * 255.0, 0, 255).astype(np.uint8)
+    positions_f32 = positions.astype(np.float32)
+
+    dtype = np.dtype([
+        ("x", "<f4"),
+        ("y", "<f4"),
+        ("z", "<f4"),
+        ("r", "u1"),
+        ("g", "u1"),
+        ("b", "u1"),
+    ])
+    vertex_data = np.empty(num_points, dtype=dtype)
+    vertex_data["x"] = positions_f32[:, 0]
+    vertex_data["y"] = positions_f32[:, 1]
+    vertex_data["z"] = positions_f32[:, 2]
+    vertex_data["r"] = colors_uint8[:, 0]
+    vertex_data["g"] = colors_uint8[:, 1]
+    vertex_data["b"] = colors_uint8[:, 2]
+
+    buffer = io.BytesIO()
+    buffer.write(header)
+    buffer.write(vertex_data.tobytes())
+    return buffer.getvalue()
+

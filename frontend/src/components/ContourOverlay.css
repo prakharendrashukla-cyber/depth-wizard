@@ -1,0 +1,333 @@
+/* ── ContourOverlay Dark Theme Stylesheet ────────────────────────────── */
+
+.contour-overlay-card {
+  background: #161b22;
+  border: 1px solid #21262d;
+  border-radius: 12px;
+  padding: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  color: #c9d1d9;
+}
+
+/* ── Header ── */
+.contour-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  border-bottom: 1px solid #21262d;
+  padding-bottom: 0.8rem;
+}
+
+.contour-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.contour-icon {
+  font-size: 1.6rem;
+}
+
+.contour-title-group h3 {
+  font-size: 1.15rem;
+  color: #f0f6fc;
+  margin: 0;
+}
+
+.contour-subtitle {
+  font-size: 0.78rem;
+  color: #8b949e;
+  margin: 2px 0 0 0;
+}
+
+.contour-export-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.contour-export-btn {
+  background: #21262d;
+  color: #c9d1d9;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+
+.contour-export-btn:hover {
+  background: #30363d;
+  color: #58a6ff;
+  border-color: #58a6ff;
+}
+
+/* ── Controls Panel ── */
+.contour-controls-panel {
+  background: #0d1117;
+  border: 1px solid #21262d;
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.controls-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+}
+
+.control-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field-label-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: #8b949e;
+}
+
+.field-label-row strong {
+  color: #58a6ff;
+  font-family: monospace;
+}
+
+.slider-box {
+  display: flex;
+  align-items: center;
+}
+
+.contour-slider {
+  width: 100%;
+  height: 5px;
+  accent-color: #58a6ff;
+  cursor: pointer;
+  border-radius: 2px;
+}
+
+/* ── Toggles Row ── */
+.toggles-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  border-top: 1px solid #21262d;
+  padding-top: 10px;
+}
+
+.toggle-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.group-lbl {
+  font-size: 0.75rem;
+  color: #8b949e;
+  margin-right: 4px;
+}
+
+.pill-toggle-btn {
+  background: #161b22;
+  color: #8b949e;
+  border: 1px solid #21262d;
+  border-radius: 20px;
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pill-toggle-btn:hover {
+  color: #c9d1d9;
+  border-color: #30363d;
+}
+
+.pill-toggle-btn.active {
+  background: rgba(88, 166, 255, 0.15);
+  border-color: #58a6ff;
+  color: #58a6ff;
+  font-weight: 600;
+}
+
+/* ── Viewport Container ── */
+.contour-viewport-container {
+  display: flex;
+  justify-content: center;
+  background: #080a10;
+  border: 1px solid #21262d;
+  border-radius: 8px;
+  overflow: hidden;
+  position: relative;
+}
+
+.contour-viewport {
+  position: relative;
+  width: 100%;
+  max-width: 720px;
+  max-height: 540px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+}
+
+.contour-bg-image {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.contour-canvas-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.contour-svg-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.contour-path {
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.8));
+  transition: stroke-width 0.15s;
+}
+
+.contour-loading-overlay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(13, 17, 23, 0.85);
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 8px 14px;
+  color: #c9d1d9;
+  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 10;
+}
+
+/* ── Legends Section ── */
+.contour-legends-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.legend-card {
+  background: #0d1117;
+  border: 1px solid #21262d;
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.legend-title {
+  font-size: 0.75rem;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-weight: 600;
+}
+
+/* Elevation Color Scale Bar */
+.elevation-scale-bar {
+  height: 10px;
+  border-radius: 4px;
+  background: linear-gradient(
+    90deg,
+    #388bfd 0%,
+    #39c5cf 25%,
+    #3fb950 50%,
+    #d29922 75%,
+    #f85149 100%
+  );
+  border: 1px solid #30363d;
+}
+
+.scale-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: #8b949e;
+  font-family: monospace;
+}
+
+/* Slope Legend Chips */
+.slope-legend-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.slope-chip {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 0.72rem;
+  color: #c9d1d9;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.chip-color {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+/* Aspect Legend Chips */
+.aspect-legend-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.aspect-chip {
+  background: #161b22;
+  border: 1px solid #21262d;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 0.72rem;
+  color: #c9d1d9;
+}

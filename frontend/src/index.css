@@ -1,0 +1,21 @@
+:root {
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  color: #e0e0e0;
+  background-color: #0a0a0f;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}

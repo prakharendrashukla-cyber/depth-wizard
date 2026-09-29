@@ -1,0 +1,455 @@
+/* ═══════════════════════════════════════════════════════════════════════════════
+   PDFExport.css — PDF Report Configuration & Export Modal Styling
+   Dark Theme: bg #080a10, card #161b22, border #21262d, text #c9d1d9, accent #58a6ff
+   ═══════════════════════════════════════════════════════════════════════════════ */
+
+.pdf-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(8, 10, 16, 0.85);
+  backdrop-filter: blur(6px);
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: fadeInOverlay 0.2s ease-out;
+}
+
+@keyframes fadeInOverlay {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.pdf-modal-card {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 14px;
+  width: 100%;
+  max-width: 820px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.75);
+  overflow: hidden;
+  animation: slideUpModal 0.22s ease-out;
+}
+
+@keyframes slideUpModal {
+  from {
+    transform: translateY(16px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* ── Modal Header ── */
+.pdf-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid #21262d;
+  background: #0d1117;
+}
+
+.modal-title-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pdf-header-icon {
+  font-size: 1.6rem;
+}
+
+.modal-title-group h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #e6edf3;
+}
+
+.modal-subtitle {
+  margin: 2px 0 0 0;
+  font-size: 0.75rem;
+  color: #8b949e;
+}
+
+.close-btn {
+  background: transparent;
+  border: none;
+  color: #8b949e;
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 2px 8px;
+  line-height: 1;
+  border-radius: 6px;
+  transition: all 0.15s;
+}
+
+.close-btn:hover {
+  color: #fff;
+  background: #21262d;
+}
+
+/* ── Modal Body ── */
+.pdf-modal-body {
+  padding: 20px;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 20px;
+}
+
+@media (max-width: 760px) {
+  .pdf-modal-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+.pdf-settings-col {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-group label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #c9d1d9;
+}
+
+.text-input {
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 8px 12px;
+  color: #c9d1d9;
+  font-size: 0.82rem;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.text-input:focus {
+  border-color: #58a6ff;
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.15);
+}
+
+/* ── Branding Radios ── */
+.branding-radios {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.radio-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #0d1117;
+  border: 1px solid #21262d;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 0.78rem;
+  color: #c9d1d9;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.radio-label:hover {
+  border-color: #30363d;
+}
+
+.radio-label.active {
+  border-color: #58a6ff;
+  background: rgba(88, 166, 255, 0.08);
+}
+
+.radio-label input[type="radio"] {
+  accent-color: #58a6ff;
+}
+
+/* ── Checkboxes Grid ── */
+.checkboxes-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+
+.checkbox-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #0d1117;
+  border: 1px solid #21262d;
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 0.76rem;
+  color: #c9d1d9;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.checkbox-item:hover {
+  border-color: #30363d;
+}
+
+.checkbox-item input[type="checkbox"] {
+  accent-color: #58a6ff;
+  cursor: pointer;
+}
+
+/* ── Miniature A4 Page Preview ── */
+.pdf-preview-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.preview-heading {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.mini-page-mockup {
+  background: #ffffff;
+  border-radius: 6px;
+  padding: 14px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: #1a1a1a;
+  min-height: 280px;
+  position: relative;
+  overflow: hidden;
+}
+
+.mini-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 6px;
+  border-bottom: 2px solid #0969da;
+}
+
+.mini-header.isro-theme {
+  border-bottom-color: #ff9933;
+}
+
+.mini-brand-tag {
+  font-size: 0.65rem;
+  font-weight: 800;
+  color: #138808;
+  letter-spacing: 0.5px;
+}
+
+.mini-header.default-theme .mini-brand-tag {
+  color: #0969da;
+}
+
+.mini-scale-tag {
+  background: #f0f3f6;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 0.6rem;
+  font-weight: 600;
+  color: #57606a;
+}
+
+.mini-title-line {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #24292f;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mini-author-line {
+  font-size: 0.6rem;
+  color: #57606a;
+  margin-top: -4px;
+}
+
+.mini-images-block {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.mini-img-box {
+  height: 48px;
+  background: #eaeef2;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.58rem;
+  color: #57606a;
+  font-weight: 600;
+}
+
+.mini-img-box.depth-box {
+  background: linear-gradient(135deg, #0969da, #8250df, #cf222e);
+  color: #ffffff;
+}
+
+.mini-table-block {
+  border: 1px solid #d0d7de;
+  border-radius: 4px;
+  padding: 4px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.mini-table-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.58rem;
+  font-weight: 700;
+  color: #0969da;
+}
+
+.mini-table-row {
+  height: 4px;
+  background: #f0f3f6;
+  border-radius: 2px;
+}
+
+.mini-graph-block {
+  background: #f6f8fa;
+  border: 1px solid #d0d7de;
+  border-radius: 4px;
+  padding: 4px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mini-graph-line {
+  height: 12px;
+  background: repeating-linear-gradient(
+    45deg,
+    #54aeff,
+    #54aeff 4px,
+    #0969da 4px,
+    #0969da 8px
+  );
+  border-radius: 2px;
+  opacity: 0.7;
+}
+
+.mini-graph-label {
+  font-size: 0.55rem;
+  color: #57606a;
+}
+
+.mini-meta-block {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.55rem;
+  color: #57606a;
+  border-top: 1px solid #eaeef2;
+  padding-top: 4px;
+  margin-top: auto;
+}
+
+.pdf-error-banner {
+  background: rgba(248, 81, 73, 0.12);
+  border: 1px solid rgba(248, 81, 73, 0.4);
+  color: #f85149;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 0.78rem;
+  margin: 0 20px 10px 20px;
+}
+
+/* ── Modal Footer ── */
+.pdf-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 20px;
+  border-top: 1px solid #21262d;
+  background: #0d1117;
+}
+
+.cancel-modal-btn {
+  background: #21262d;
+  color: #c9d1d9;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 7px 14px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.cancel-modal-btn:hover:not(:disabled) {
+  background: #30363d;
+  color: #fff;
+}
+
+.generate-pdf-btn {
+  background: linear-gradient(135deg, #238636, #2ea043);
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 18px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.generate-pdf-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(46, 160, 67, 0.4);
+}
+
+.generate-pdf-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.pdf-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
