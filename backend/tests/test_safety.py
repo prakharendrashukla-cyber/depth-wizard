@@ -15,7 +15,7 @@ from app.safety import safe_path
 from app.batch import BatchProcessor
 
 @pytest.fixture
-def client():
+def client(owner):
     with TestClient(main.app, raise_server_exceptions=False) as client:
         yield client
 

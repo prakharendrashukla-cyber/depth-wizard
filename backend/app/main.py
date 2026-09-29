@@ -36,7 +36,7 @@ from contextlib import asynccontextmanager
 from typing import Optional, List
 
 import numpy as np
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Request
+from fastapi import Depends, FastAPI, UploadFile, File, HTTPException, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -44,6 +44,11 @@ from pydantic import BaseModel
 from PIL import Image
 
 from app.depth import DepthEstimator, colorize_depth, list_available_models
+from sqlalchemy.orm import Session
+from sqlalchemy import select
+from app.database import init_db, get_db, User, BatchJobRecord, SessionLocal, now
+from app.identity import get_current_user
+from app.analyses import router as analyses_router, save_analysis
 from app.config import ALLOWED_ORIGINS, MAX_BATCH_FILES, BATCH_LIMIT
 from app.safety import safe_path, read_upload, UploadLimitMiddleware
 from app.mesh import depth_to_point_cloud
@@ -114,6 +119,7 @@ def get_batch_processor():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Start loading depth model in background thread without blocking server bind."""
+    init_db()
     track_task(asyncio.to_thread(get_estimator))
     cleanup = track_task(cleanup_jobs())
     yield
@@ -139,6 +145,7 @@ app.add_middleware(
 )
 
 
+app.include_router(analyses_router)
 app.add_middleware(UploadLimitMiddleware)
 
 @app.exception_handler(Exception)
@@ -266,6 +273,8 @@ async def get_sample_image(name: str):
 async def estimate_depth(
     image: UploadFile = File(...),
     model: Optional[str] = Form(None),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """
     Accept an image, run depth estimation, and return:
@@ -352,6 +361,7 @@ async def estimate_depth(
     if geo_metadata:
         response["geo_metadata"] = geo_metadata
 
+    response["analysis_id"] = save_analysis(db, user, response)
     return JSONResponse(content=response)
 
 
@@ -739,7 +749,7 @@ async def export_pdf(req: ExportPdfRequest):
 # ── Batch Processing ─────────────────────────────────────────────────────
 
 @app.post("/batch")
-async def batch_process(images: List[UploadFile] = File(...)):
+async def batch_process(images: List[UploadFile] = File(...), user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Process multiple images in batch mode."""
     try:
         bp = get_batch_processor()
@@ -758,10 +768,9 @@ async def batch_process(images: List[UploadFile] = File(...)):
 
         job_id = bp.create_job(image_data)
 
-        # Process in background thread
-        track_task(
-            asyncio.to_thread(bp.process_job, job_id, est, analyze_height)
-        )
+        db.add(BatchJobRecord(id=job_id, user_id=user.id, status="pending"))
+        db.commit()
+        track_task(asyncio.to_thread(run_persistent_batch, bp, job_id, est))
 
         return JSONResponse(content={
             "job_id": job_id,
@@ -778,11 +787,44 @@ async def batch_process(images: List[UploadFile] = File(...)):
         raise HTTPException(500, "Unable to complete the request") from exc
 
 
+def run_persistent_batch(bp, job_id, est):
+    def update_job(job):
+        with SessionLocal.begin() as db:
+            row = db.get(BatchJobRecord, job_id)
+            if row:
+                row.status = job.status
+                row.progress = job.to_dict(include_images=False)
+                row.updated_at = now()
+                if job.status in {"done", "error"}:
+                    row.completed_at = now()
+    try:
+        bp.process_job(job_id, est, analyze_height, progress_callback=update_job)
+    except Exception:
+        logger.exception("Batch processing failed")
+        with SessionLocal.begin() as db:
+            row = db.get(BatchJobRecord, job_id)
+            row.status = "error"
+            row.completed_at = now()
+        job = bp.jobs.get(job_id)
+        if job:
+            job.status = "error"
+            job.expires_at = time.time()
+        bp._job_images.pop(job_id, None)
+
+def owned_batch(job_id, user, db):
+    row = db.scalar(select(BatchJobRecord).where(BatchJobRecord.id == job_id, BatchJobRecord.user_id == user.id))
+    if row is None:
+        raise HTTPException(404, "Job not found")
+    return row
+
 @app.get("/batch/{job_id}/status")
-async def batch_status(job_id: str):
+async def batch_status(job_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Get batch job progress and status."""
+    row = owned_batch(job_id, user, db)
     try:
         bp = get_batch_processor()
+        if job_id not in bp.jobs:
+            return {**row.progress, "job_id": row.id, "status": row.status, "artifacts_available": False}
         status = bp.get_job_status(job_id)
         if status is None:
             raise HTTPException(404, "Job not found")
@@ -798,10 +840,15 @@ async def batch_status(job_id: str):
 
 
 @app.get("/batch/{job_id}/download")
-async def batch_download(job_id: str):
+async def batch_download(job_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Download batch results as a ZIP file."""
+    owned_batch(job_id, user, db)
     try:
         bp = get_batch_processor()
+        if job_id not in bp.jobs:
+            raise HTTPException(410, "Batch files expired or server restarted")
+        if bp.jobs[job_id].status not in {"done", "error"}:
+            raise HTTPException(409, "Batch is still processing")
         zip_bytes = bp.generate_zip(job_id)
         if zip_bytes is None:
             raise HTTPException(404, "Job not found or not complete")
@@ -821,10 +868,13 @@ async def batch_download(job_id: str):
 
 
 @app.get("/batch/{job_id}/summary")
-async def batch_summary(job_id: str):
+async def batch_summary(job_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Get aggregate summary for a completed batch job."""
+    row = owned_batch(job_id, user, db)
     try:
         bp = get_batch_processor()
+        if job_id not in bp.jobs:
+            return {"job_id": row.id, "status": row.status, "artifacts_available": False}
         summary = bp.get_summary(job_id)
         if summary is None:
             raise HTTPException(404, "Job not found")
