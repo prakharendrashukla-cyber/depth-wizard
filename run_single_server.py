@@ -1,46 +1,56 @@
 #!/usr/bin/env python3
-"""
-Depth Wizard — Unified Single Server Runner
-Runs both Frontend React SPA and Backend FastAPI on a SINGLE Port!
-
-Usage:
-    py run_single_server.py [--port 8000] [--host 0.0.0.0]
-"""
-
-import os
-import sys
+"""Serve the built frontend and FastAPI on one port."""
 import argparse
+from pathlib import Path
+import shutil
 import subprocess
+import sys
+import threading
+import time
+import urllib.error
+import urllib.request
+import webbrowser
+
+
+def open_when_ready(url):
+    """Open only after the server answers, without blocking startup."""
+    for _ in range(60):
+        try:
+            with urllib.request.urlopen(url + "/health", timeout=1) as response:
+                if response.status == 200:
+                    webbrowser.open(url)
+                    return
+        except (urllib.error.URLError, OSError):
+            time.sleep(0.5)
+
 
 def main():
-    parser = argparse.ArgumentParser(description="Depth Wizard Unified Single-Server Runner")
-    parser.add_argument("--port", type=int, default=8000, help="Port to bind server (default: 8000)")
-    parser.add_argument("--host", type=str, default="0.0.0.0", help="Host address (default: 0.0.0.0)")
+    parser = argparse.ArgumentParser(description="Depth Wizard single-server runner")
+    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--open-browser", action="store_true")
     args = parser.parse_args()
+    root = Path(__file__).resolve().parent
+    frontend = root / "frontend"
+    backend = root / "backend"
+    if not (frontend / "dist" / "index.html").is_file():
+        npm = shutil.which("npm.cmd") or shutil.which("npm")
+        if npm is None:
+            parser.exit(1, "Frontend build is missing. Install Node.js and run setup.bat.\n")
+        print("Frontend build missing. Building production bundle...", flush=True)
+        try:
+            subprocess.run([npm, "run", "build"], cwd=frontend, check=True)
+        except subprocess.CalledProcessError:
+            parser.exit(1, "Frontend build failed. Run setup.bat and retry.\n")
 
-    root_dir = os.path.dirname(os.path.abspath(__file__))
-    frontend_dist = os.path.join(root_dir, "frontend", "dist")
-    backend_dir = os.path.join(root_dir, "backend")
-
-    # If frontend dist doesn't exist, build it
-    if not os.path.isdir(frontend_dist) or not os.path.isfile(os.path.join(frontend_dist, "index.html")):
-        print("📦 Frontend build missing. Building production bundle...")
-        subprocess.run(["npm", "run", "build"], cwd=os.path.join(root_dir, "frontend"), shell=True, check=True)
-
-    print(f"\n=======================================================")
-    print(f"🧙‍♂️ Depth Wizard — Unified Single-Server")
-    print(f"=======================================================")
-    print(f"🌐 Full Web App (UI + API): http://localhost:{args.port}/")
-    print(f"📄 API Documentation:       http://localhost:{args.port}/docs")
-    print(f"📡 Backend & Frontend are serving from the same port!")
-    print(f"=======================================================\n")
-
-    # Add backend directory to sys.path so app.main can be imported
-    if backend_dir not in sys.path:
-        sys.path.insert(0, backend_dir)
-
+    url = f"http://localhost:{args.port}"
+    print(f"\nDepth Wizard - UI and API: {url}\nAPI documentation: {url}/docs\n", flush=True)
+    sys.path.insert(0, str(backend))
+    if args.open_browser:
+        threading.Thread(target=open_when_ready, args=(url,), daemon=True).start()
     import uvicorn
-    uvicorn.run("app.main:app", host=args.host, port=args.port, reload=False, app_dir=backend_dir)
+    uvicorn.run("app.main:app", host=args.host, port=args.port, reload=False, app_dir=str(backend))
+
 
 if __name__ == "__main__":
     main()

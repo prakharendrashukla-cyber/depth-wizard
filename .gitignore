@@ -35,3 +35,15 @@ Thumbs.db
 .env.local
 
 backend/data/
+
+# Local checks and generated caches
+.scratch/
+.pytest_cache/
+.ruff_cache/
+
+# Downloaded tools and generated presentation/export binaries
+*.exe
+*.exe.download
+*.pptx
+*.pdf
+*.zip

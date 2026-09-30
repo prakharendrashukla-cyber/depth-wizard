@@ -1,175 +1,146 @@
-# Depth Wizard 🧙‍♂️ v1.0
+# Depth Wizard
 
-**Single-View Height Estimation, 3D Reconstruction & Geospatial Intelligence Platform**
+Depth Wizard is a hackathon prototype for single-image depth estimation, height analysis, and browser-based 3D point-cloud exploration. It uses FastAPI, React/Vite, Three.js, and SQLite.
 
-Given a single 2D image, Depth Wizard estimates a depth map, reconstructs a 3D scene, estimates real-world heights of structures, generates contour maps, computes volumes, and renders an interactive 3D flythrough — all in your browser.
+The app now requires an account for analysis operations and saves each successful single-image analysis to that user's history. Authentication uses Argon2 password hashes and a seven-day JWT in an HttpOnly, SameSite=Lax cookie.
 
-> Built for SIH 2026 · ISRO Problem Statement
+## Windows setup
 
----
+Use **Python 3.12** and **Node.js 22 LTS**. The pinned Python dependencies were selected for Python 3.12. A GPU is optional. Installation and the first neural-model load require internet access.
 
-## ✨ Features
+1. Run `setup.bat`. It creates a project-local `.venv`, installs pinned Python dependencies and the frontend lockfile, builds the frontend, and copies `.env.example` to `.env` if needed. It stops if any step fails.
+2. Run `start.bat`. One server serves the UI and API at **http://localhost:8000** and opens the browser after the server responds.
+3. Select **Create an account**, enter a name, email, and password of at least eight characters. Registration signs you in. No email service is required.
+4. Upload an image. Open **My Analyses** to reopen or delete saved results, including after a refresh. Use **Logout** in the header to end the browser session.
+5. Keep the launcher window open; press Ctrl+C to stop.
 
-### Core Engine
-- 🧠 **Multi-Model Depth Estimation** — Depth Anything V2 (S/B/L), MiDaS v3.1, ZoeDepth, Metric3D, procedural fallback
-- 🌐 **Interactive 3D Point Cloud** — Real-time Three.js viewer with orbit controls, cinematic flythrough, and measurement tools
-- 📏 **Height Estimation** — Ground baseline detection, peak elevation, relief analysis, elevation profiles
-- 🎯 **GCP Calibration** — Click reference points with known heights → auto-calibrate to absolute meters with R² confidence
+`setup.bat --no-pause` supports unattended setup. Rerun setup after pulling changes to update dependencies and rebuild the UI.
 
-### Geospatial
-- 🛰️ **ISRO Satellite Integration** — GeoTIFF support, Cartosat/Chandrayaan metadata parsing
-- 🗺️ **Map View** — Leaflet.js map overlay with lat/long coordinates for georeferenced imagery
-- 📡 **Satellite Metadata Panel** — GSD, CRS, sensor info, orbit parameters, ISRO branding
+For a lightweight demonstration without downloading weights, set `DEPTH_MODEL=procedural-fallback` in `.env`. This mode produces illustrative heuristic depth, not measured elevations.
 
-### Analysis
-- 📊 **Accuracy Validation Dashboard** — Compare against ground truth DEMs with RMSE, MAE, AbsRel, δ₁ metrics
-- 🔬 **Uncertainty Visualization** — Per-pixel confidence heatmap with unreliable region detection
-- 🗺️ **Contour Map Generation** — Configurable contour lines + slope/aspect maps, SVG/DXF export
-- 🏗️ **Volume Estimation** — Cubic meters above ground + shadow casting with sun angle controls
-- 🔄 **Multi-Model Comparison** — Switch models and compare outputs side-by-side
+## Manual and development commands
 
-### Processing
-- 📹 **Video / Multi-Frame** — Process video frame-by-frame with temporal smoothing
-- 📦 **Batch Processing** — Upload multiple images → process all → download ZIP
-- 📄 **PDF Report Generation** — Professional multi-page reports with ISRO branding option
-- ⚡ **PWA** — Installable on mobile/tablet with camera capture support
+From the repository root in PowerShell:
 
-### UX
-- 🎯 **Live Demo Tour** — Guided walkthrough with pre-loaded impressive examples
-- 📐 **3D Measurement Tools** — Point-to-point distance, height difference, area measurement
-- 🎨 **Multiple Colormaps** — Photo RGB, Inferno, Topographic Rainbow, Viridis, Turbo
-
----
-
-## Quick Start
-
-### Prerequisites
-- **Python 3.10+** with `pip`
-- **Node.js 18+** with `npm`
-- A GPU is optional but recommended (CPU inference works, just slower)
-
-### Windows: One-Click Launch
-```bash
-start.bat
-```
-
-### Manual Start
-
-#### 1. Start the Backend
-```bash
-cd backend
-pip install -r requirements.txt
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-#### 2. Start the Frontend
-```bash
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r backend/requirements.txt
+Copy-Item .env.example .env  # Only if .env does not already exist
 cd frontend
-npm install
+npm ci
+npm run build
+cd ..
+.\.venv\Scripts\python.exe run_single_server.py --host 127.0.0.1 --port 8000
+```
+
+For frontend hot reload, run these in separate terminals:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
+```
+
+```powershell
+cd frontend
 npm run dev
 ```
 
-The UI will be live at `http://localhost:5173`. API docs at `http://localhost:8000/docs`.
+Browse to http://localhost:5173 in development. Vite proxies `/api` to the backend. The production service worker is not registered in development. The unified server also accepts `/api/*`; API responses are excluded from service-worker caching.
 
----
+`run.py` remains an alias for the single-server runner. If the production bundle is missing, the runner tries `npm run build`; install dependencies first.
 
-## Project Structure
+## Configuration
 
-```
-depth-wizard/
-├── backend/                     # FastAPI backend
-│   ├── app/
-│   │   ├── main.py              # FastAPI app & all routes
-│   │   ├── depth.py             # Multi-model depth estimation engine
-│   │   ├── mesh.py              # Depth → 3D point cloud
-│   │   ├── height.py            # Height estimation & analysis
-│   │   ├── calibration.py       # GCP calibration engine
-│   │   ├── contour.py           # Contour map & slope/aspect
-│   │   ├── volume.py            # Volume estimation & shadow casting
-│   │   ├── uncertainty.py       # Confidence/uncertainty estimation
-│   │   ├── validation.py        # Accuracy metrics & benchmarks
-│   │   ├── video_processor.py   # Video multi-frame processing
-│   │   ├── geotiff.py           # GeoTIFF & satellite metadata
-│   │   ├── report.py            # PDF report generator
-│   │   └── batch.py             # Batch processing engine
-│   ├── requirements.txt
-│   └── sample_images/
-├── frontend/                    # React + Vite + Three.js
-│   ├── src/
-│   │   ├── App.jsx              # Main app with tabbed navigation
-│   │   ├── components/
-│   │   │   ├── ImageUpload.jsx       # Image/video/GeoTIFF uploader
-│   │   │   ├── SceneViewer.jsx       # 3D point cloud viewer
-│   │   │   ├── HeightOverlay.jsx     # Height analysis panel
-│   │   │   ├── GCPCalibration.jsx    # Ground control point calibration
-│   │   │   ├── ContourOverlay.jsx    # Contour map visualization
-│   │   │   ├── VolumePanel.jsx       # Volume & shadow analysis
-│   │   │   ├── MapView.jsx           # Leaflet geospatial map
-│   │   │   ├── ValidationDashboard.jsx # Accuracy validation
-│   │   │   ├── UncertaintyView.jsx   # Confidence visualization
-│   │   │   ├── ModelSelector.jsx     # Multi-model switcher
-│   │   │   ├── VideoProcessor.jsx    # Video processing UI
-│   │   │   ├── BatchProcessor.jsx    # Batch processing UI
-│   │   │   ├── PDFExport.jsx         # PDF report config
-│   │   │   ├── DemoTour.jsx          # Guided demo tour
-│   │   │   └── SatelliteMetadata.jsx # Satellite metadata display
-│   │   └── main.jsx
-│   ├── public/
-│   │   ├── manifest.json        # PWA manifest
-│   │   ├── sw.js                # Service worker
-│   │   └── icons/
-│   ├── package.json
-│   └── vite.config.js
-├── start.bat                    # Windows one-click launcher
-├── share_online.bat             # Cloudflare tunnel sharing
-└── README.md
+The backend loads `.env` from the repository root, regardless of the working directory. Environment variables override the file.
+
+| Variable | Default / behavior |
+| --- | --- |
+| `APP_ENV` | `development`; `production` requires a configured secret |
+| `SECRET_KEY` | Required in production, at least 32 characters; development stores a generated key in `backend/data/.development_secret` |
+| `DATABASE_URL` | SQLite at the absolute path `backend/data/depthwizard.db` |
+| `UPLOAD_DIR` | `backend/data/uploads`; image and result files grouped by user ID |
+| `ALLOWED_ORIGINS` | `http://localhost:5173,http://localhost:8000`; comma-separated explicit origins |
+| `MAX_IMAGE_MB` | `20` |
+| `MAX_VIDEO_MB` | `100` |
+| `MAX_BATCH_FILES` | `20` |
+| `MAX_BATCH_MB` | `100` combined batch upload |
+| `BATCH_TTL_SECONDS` | `3600`; completed in-memory batch artifacts expire |
+| `DEPTH_MODEL` | Automatic model selection; use `procedural-fallback` for a no-weight demo |
+| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Optional initial administrator; both must be supplied |
+
+Generate a production secret with:
+
+```powershell
+.\.venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
----
+An initial administrator is created only if its email does not already exist. Startup does not change an existing user's role or password. This prototype has no separate admin dashboard.
 
-## API Reference
+SQLite tables are created on startup using SQLAlchemy 2.0. A future PostgreSQL deployment can use a SQLAlchemy PostgreSQL URL after installing its driver and migrating any existing data; that deployment is not tested here. Back up the database and upload directory together while the server is stopped.
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/health` | Server health + model info |
-| GET | `/models` | List available depth models |
-| GET | `/benchmarks` | Benchmark comparison data |
-| GET | `/samples` | List demo images |
-| POST | `/estimate` | Core depth estimation |
-| POST | `/estimate/video` | Video multi-frame processing |
-| POST | `/calibrate` | GCP calibration |
-| POST | `/contour` | Contour map generation |
-| POST | `/volume` | Volume estimation |
-| POST | `/volume/shadow` | Shadow map computation |
-| POST | `/uncertainty` | Uncertainty/confidence map |
-| POST | `/validate` | Accuracy validation vs ground truth |
-| POST | `/export/ply` | 3D point cloud PLY export |
-| POST | `/export/report` | JSON analysis report |
-| POST | `/export/pdf` | Professional PDF report |
-| POST | `/batch` | Batch multi-image processing |
-| GET | `/batch/{id}/status` | Batch job progress |
-| GET | `/batch/{id}/download` | Batch results ZIP |
+Use HTTPS on any hostname other than localhost: session cookies are Secure for remote hosts. Login and registration share a limit of ten attempts per minute per client IP. The in-memory limiter and batch worker are intended for a single-process prototype.
 
----
+## Sharing a demo
 
-## Tech Stack
+Start the app with `start.bat`, then run `share_online.bat`. It downloads the Windows x64 cloudflared executable from the official Cloudflare GitHub release into the ignored `tools/` directory when missing, then tunnels port 8000. Use the displayed HTTPS address; visitors must register or log in. Closing the tunnel stops public access.
 
-| Layer | Technology |
-|-------|-----------|
-| Backend | Python, FastAPI, Uvicorn |
-| Depth | Depth Anything V2, MiDaS, ZoeDepth, Metric3D |
-| 3D Export | NumPy depth-to-mesh, glTF/PLY output |
-| GeoTIFF | tifffile, Pillow |
-| Video | OpenCV |
-| PDF | ReportLab |
-| Validation | SciPy, NumPy |
-| Frontend | React 18, Vite, Three.js, react-three-fiber |
-| Maps | Leaflet.js + OpenStreetMap |
-| PWA | Service Worker, Web App Manifest |
-| API | REST — stateless, no auth, no DB |
+`create_clean_zip.bat` creates a source archive in the repository root, excluding environments, credentials, uploads, database files, downloaded tools, and model weights.
 
----
+## Tests
 
-## License
+From the repository root:
 
-MIT — hack away.
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m ruff check backend/app backend/tests run.py run_single_server.py scripts --select F
+cd frontend
+npm test
+npm run build
+```
+
+The default tests use a temporary database and procedural depth. They cover registration/login/logout, ownership, upload and path safeguards, failed model switches, persistence, point-cloud payloads, and deterministic numerical examples. They do not prove real-world DSM accuracy.
+
+An optional test exercises the actual Depth Anything V2 Small model:
+
+```powershell
+$env:RUN_NEURAL_TESTS = "1"
+.\.venv\Scripts\python.exe -m pytest -q -m neural
+Remove-Item Env:RUN_NEURAL_TESTS
+```
+
+This may download weights and take longer. The default test run skips it. The production build retains the existing size warning for the lazy-loaded Three.js viewer.
+
+## API
+
+Interactive API documentation: http://localhost:8000/docs. Routes work with or without the `/api` prefix.
+
+| Routes | Purpose |
+| --- | --- |
+| `POST /auth/register`, `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` | Cookie session management |
+| `GET /health`, `GET /models`, `GET /samples`, `GET /benchmarks` | Public health and demo metadata |
+| `POST /estimate`, `POST /estimate/video` | Authenticated depth processing |
+| `GET /analyses?page=1&page_size=20` | Current user's paginated history |
+| `GET /analyses/{id}`, `DELETE /analyses/{id}` | Reopen or delete an owned result; other users get 404 |
+| `POST /calibrate`, `POST /contour`, `POST /volume`, `POST /volume/shadow` | Authenticated analysis |
+| `POST /uncertainty`, `POST /validate` | Authenticated diagnostics |
+| `POST /export/ply`, `POST /export/report`, `POST /export/pdf` | Authenticated exports |
+| `POST /batch`, `GET /batch/{id}/status`, `GET /batch/{id}/summary`, `GET /batch/{id}/download` | Owner-only batch processing and results |
+
+Batch job metadata survives restart, but batch ZIP artifacts live in memory. Interrupted jobs are marked accordingly on startup; expired or restarted downloads return 410. Single-image history files persist until deletion.
+
+## Repository
+
+- `backend/app/`: API, authentication, database, and depth/analysis modules.
+- `backend/tests/`: pytest tests, migrated from the original ad-hoc scripts.
+- `backend/data/`: ignored private database, secret, and saved analyses.
+- `frontend/src/`: authenticated application, shared API wrapper, history, and lazy-loaded analysis views.
+- `docs/`: original presentation sources and HTML; existing PowerPoint files are retained locally here and ignored as generated binaries.
+- `scripts/`: source-archive helper.
+- `tools/`: ignored downloaded cloudflared executable.
+
+## Prototype limitations
+
+The viewer displays a point cloud with orbit controls and an automated flythrough. Metric elevation accuracy requires reference data and validation. GeoTIFF metadata alone does not determine absolute vertical scale; this work does not complete a validated DSM GeoTIFF export pipeline or textured first-person terrain navigation.
+
+The existing validation dashboard and presentation assets contain illustrative or synthetic benchmark claims. They are retained as prototype materials, not evidence of measured accuracy. The batch upload UI now reports actual processing errors rather than fabricating fallback results.
+
+Neural-model compatibility, GPU performance, and real-world accuracy must be evaluated separately with suitable reference imagery.

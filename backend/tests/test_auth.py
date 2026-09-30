@@ -59,3 +59,29 @@ def test_remote_cookie_and_origin():
         assert "Secure" in register(client).headers["set-cookie"]
         assert client.get("/auth/me").status_code == 200
         assert client.post("/auth/logout", headers={"Origin":"https://evil.example.com"}).status_code == 403
+
+
+@pytest.mark.parametrize("path", [
+    "/estimate", "/estimate/video", "/calibrate", "/contour", "/volume",
+    "/volume/shadow", "/uncertainty", "/validate", "/export/ply",
+    "/export/report", "/export/pdf", "/batch",
+])
+def test_processing_requires_auth(path):
+    with TestClient(app, base_url="http://localhost") as client:
+        assert client.post(path).status_code == 401
+
+
+def test_batch_ownership_survives_memory_expiry():
+    from app.database import BatchJobRecord
+    with TestClient(app, base_url="http://localhost") as a, TestClient(app, base_url="http://localhost") as b:
+        register(a)
+        register(b, "two@example.com")
+        owner_id = a.get("/auth/me").json()["id"]
+        with SessionLocal.begin() as db:
+            db.add(BatchJobRecord(id="expired-job", user_id=owner_id, status="done"))
+        for endpoint in ("status", "summary", "download"):
+            assert b.get(f"/batch/expired-job/{endpoint}").status_code == 404
+        status = a.get("/batch/expired-job/status")
+        assert status.status_code == 200
+        assert status.json()["artifacts_available"] is False
+        assert a.get("/batch/expired-job/download").status_code == 410
