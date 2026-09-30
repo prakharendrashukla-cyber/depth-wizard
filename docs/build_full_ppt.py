@@ -307,7 +307,7 @@ def build_pptx(output_path):
     add_card(s8, Inches(0.8), Inches(1.7), Inches(5.6), Inches(5.2), "🛰️ GeoTIFF & Orbital Metadata Extraction", [
         "GeoTIFF Tag Parsing: Automatic extraction of CRS, affine geo-transform, bounding coordinates, and radiometric bits.",
         "Sensor Ground Sample Distance (GSD): Computes pixel scale (e.g. 0.28m/px for Cartosat-3, 0.32m/px for Chandrayaan TMC-2).",
-        "Integrated Leaflet.js Map: Displays georeferenced satellite DEM overlays directly on global/lunar coordinate maps.",
+        "Coordinate Context: Displays CRS and parsed raster bounds when input georeferencing is available.",
         "ISRO Telemetry Presets: Pre-loaded orbital parameters for Cartosat-3, Chandrayaan-2, and Sentinel-2.",
     ], header_color=ACCENT_PURPLE)
     add_card(s8, Inches(6.8), Inches(1.7), Inches(5.7), Inches(5.2), "⚡ 4-Stage Monocular Processing Telemetry", [
@@ -916,7 +916,7 @@ def build_html_presentation(output_path):
           <ul>
             <li><strong>GeoTIFF Tag Parsing:</strong> Automatic extraction of CRS, affine geo-transform, bounding coordinates, and radiometric bits.</li>
             <li><strong>Sensor GSD (m/px):</strong> Computes spatial resolution (0.28m for Cartosat-3, 0.32m for Chandrayaan TMC-2).</li>
-            <li><strong>Integrated Leaflet.js Map:</strong> Displays georeferenced satellite DEM overlays on global coordinate maps.</li>
+            <li><strong>Coordinate Context:</strong> Displays CRS and parsed raster bounds when input georeferencing is available.</li>
             <li><strong>ISRO Telemetry Presets:</strong> Pre-loaded orbital parameters for Cartosat-3, Chandrayaan-2, and Sentinel-2.</li>
           </ul>
         </div>

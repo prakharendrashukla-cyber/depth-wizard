@@ -12,138 +12,27 @@ import { apiFetch } from "../api";
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import "./ValidationDashboard.css";
 
-// ── Standard Default Benchmark Dataset Comparisons ─────────────────────────
-const DEFAULT_BENCHMARKS = [
-  // NYU Depth V2
-  { dataset: "NYU Depth V2", model: "Depth Anything V2 (Small)", rmse: 0.268, mae: 0.174, absRel: 0.046, delta1: 0.984, rank: "Top 1%" },
-  { dataset: "NYU Depth V2", model: "ZoeDepth (NK)", rmse: 0.270, mae: 0.181, absRel: 0.049, delta1: 0.978, rank: "Top 2%" },
-  { dataset: "NYU Depth V2", model: "MiDaS v3.1 (DPT-Large)", rmse: 0.336, mae: 0.231, absRel: 0.082, delta1: 0.941, rank: "Top 10%" },
-  { dataset: "NYU Depth V2", model: "NeWCRFs", rmse: 0.322, mae: 0.218, absRel: 0.076, delta1: 0.952, rank: "Top 8%" },
-  
-  // KITTI Eigen Benchmark
-  { dataset: "KITTI Eigen Split", model: "Depth Anything V2 (Small)", rmse: 2.152, mae: 1.284, absRel: 0.061, delta1: 0.975, rank: "Top 1%" },
-  { dataset: "KITTI Eigen Split", model: "Marigold Latent-Diff", rmse: 2.310, mae: 1.410, absRel: 0.073, delta1: 0.958, rank: "Top 5%" },
-  { dataset: "KITTI Eigen Split", model: "MiDaS v3.1 (DPT-Large)", rmse: 2.780, mae: 1.820, absRel: 0.096, delta1: 0.925, rank: "Top 12%" },
-  { dataset: "KITTI Eigen Split", model: "DPT-Hybrid", rmse: 2.573, mae: 1.620, absRel: 0.088, delta1: 0.938, rank: "Top 9%" },
+function asFiniteNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
 
-  // Make3D Outdoor
-  { dataset: "Make3D", model: "Depth Anything V2 (Small)", rmse: 3.120, mae: 1.940, absRel: 0.114, delta1: 0.912, rank: "Top 2%" },
-  { dataset: "Make3D", model: "ZoeDepth (NK)", rmse: 3.250, mae: 2.080, absRel: 0.126, delta1: 0.898, rank: "Top 4%" },
-  { dataset: "Make3D", model: "MiDaS v3.1 (DPT-Large)", rmse: 3.650, mae: 2.410, absRel: 0.152, delta1: 0.865, rank: "Top 15%" },
-
-  // ISRO Planetary DEM / Lunar Benchmark
-  { dataset: "ISRO Planetary DEM", model: "Depth Anything V2 (Small)", rmse: 0.385, mae: 0.245, absRel: 0.058, delta1: 0.967, rank: "Top 1%" },
-  { dataset: "ISRO Planetary DEM", model: "MiDaS Small (Baseline)", rmse: 0.612, mae: 0.418, absRel: 0.112, delta1: 0.884, rank: "Baseline" },
-];
-
-/**
- * Generate synthetic validation data points and metrics for demonstration
- * or client-side fallback computation when raw rasters are loaded.
- */
-function computeSyntheticValidation(scaleFactor = 1.0, noiseLevel = 0.07) {
-  const numSamples = 300;
-  const scatterPoints = [];
-  const errors = [];
-  
-  let sumSqErr = 0;
-  let sumAbsErr = 0;
-  let sumAbsRel = 0;
-  let sumSqRel = 0;
-  let delta1Count = 0;
-  let delta2Count = 0;
-  let delta3Count = 0;
-  
-  let sumX = 0;
-  let sumY = 0;
-  let sumXY = 0;
-  let sumX2 = 0;
-  let sumY2 = 0;
-
-  for (let i = 0; i < numSamples; i++) {
-    // True ground truth depth between 1.5m and 35.0m (scaled)
-    const normalizedDist = Math.random();
-    const trueDepth = (1.5 + normalizedDist * 33.5) * (scaleFactor / 10.0 || 1.0);
-    
-    // Add realistic heteroscedastic noise (larger distance -> slightly higher noise)
-    const err = (Math.random() - 0.48) * (noiseLevel * trueDepth + 0.15);
-    const estDepth = Math.max(0.2, trueDepth + err);
-    const absErr = Math.abs(estDepth - trueDepth);
-    const relRatio = Math.max(estDepth / trueDepth, trueDepth / estDepth);
-
-    scatterPoints.push({
-      gt: parseFloat(trueDepth.toFixed(2)),
-      est: parseFloat(estDepth.toFixed(2)),
-      error: parseFloat(err.toFixed(2)),
+function normalizeBenchmarkRows(benchmarks) {
+  return benchmarks.flatMap((benchmark) => {
+    const models = Array.isArray(benchmark.models) ? benchmark.models : [benchmark];
+    return models.map((entry) => {
+      const delta1 = asFiniteNumber(entry.delta1 ?? entry.delta_1);
+      return {
+        dataset: benchmark.dataset ?? entry.dataset ?? "Unknown dataset",
+        model: entry.model ?? entry.name ?? "Unknown model",
+        rmse: asFiniteNumber(entry.rmse),
+        mae: asFiniteNumber(entry.mae),
+        absRel: asFiniteNumber(entry.absRel ?? entry.abs_rel),
+        delta1: delta1 !== null && delta1 > 1 ? delta1 / 100 : delta1,
+        rank: typeof entry.rank === "string" ? entry.rank : null,
+      };
     });
-
-    errors.push(err);
-    sumSqErr += err * err;
-    sumAbsErr += absErr;
-    sumAbsRel += absErr / trueDepth;
-    sumSqRel += (err * err) / trueDepth;
-
-    if (relRatio < 1.25) delta1Count++;
-    if (relRatio < 1.25 ** 2) delta2Count++;
-    if (relRatio < 1.25 ** 3) delta3Count++;
-
-    sumX += trueDepth;
-    sumY += estDepth;
-    sumXY += trueDepth * estDepth;
-    sumX2 += trueDepth * trueDepth;
-    sumY2 += estDepth * estDepth;
-  }
-
-  const n = numSamples;
-  const rmse = Math.sqrt(sumSqErr / n);
-  const mae = sumAbsErr / n;
-  const absRel = sumAbsRel / n;
-  const sqRel = sumSqRel / n;
-  const delta1 = (delta1Count / n) * 100;
-  const delta2 = (delta2Count / n) * 100;
-  const delta3 = (delta3Count / n) * 100;
-
-  // Linear Regression: y = slope * x + intercept
-  const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX || 1);
-  const intercept = (sumY - slope * sumX) / n;
-  const rNum = n * sumXY - sumX * sumY;
-  const rDen = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY)) || 1;
-  const r2 = Math.min(0.999, Math.max(0.0, (rNum / rDen) ** 2));
-
-  // Compute 15-bin Error Histogram
-  const minErr = Math.min(...errors);
-  const maxErr = Math.max(...errors);
-  const binCount = 15;
-  const binStep = (maxErr - minErr) / binCount || 0.1;
-  const bins = Array.from({ length: binCount }, (_, i) => ({
-    binStart: minErr + i * binStep,
-    binEnd: minErr + (i + 1) * binStep,
-    count: 0,
-  }));
-
-  errors.forEach((e) => {
-    let bIdx = Math.floor((e - minErr) / binStep);
-    if (bIdx >= binCount) bIdx = binCount - 1;
-    if (bIdx >= 0) bins[bIdx].count++;
   });
-
-  return {
-    metrics: {
-      rmse: parseFloat(rmse.toFixed(3)),
-      mae: parseFloat(mae.toFixed(3)),
-      absRel: parseFloat(absRel.toFixed(4)),
-      sqRel: parseFloat(sqRel.toFixed(4)),
-      delta1: parseFloat(delta1.toFixed(1)),
-      delta2: parseFloat(delta2.toFixed(1)),
-      delta3: parseFloat(delta3.toFixed(1)),
-      r2: parseFloat(r2.toFixed(3)),
-      regression: { slope: parseFloat(slope.toFixed(3)), intercept: parseFloat(intercept.toFixed(3)) },
-    },
-    scatterPoints,
-    histogram: bins.map((b) => ({
-      ...b,
-      percentage: parseFloat(((b.count / n) * 100).toFixed(1)),
-    })),
-  };
 }
 
 export default function ValidationDashboard({
@@ -155,7 +44,7 @@ export default function ValidationDashboard({
   const [groundTruthFile, setGroundTruthFile] = useState(null);
   const [groundTruthPreview, setGroundTruthPreview] = useState(null);
   const [validationResult, setValidationResult] = useState(null);
-  const [benchmarks, setBenchmarks] = useState(DEFAULT_BENCHMARKS);
+  const [benchmarks, setBenchmarks] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [dragActive, setDragActive] = useState(false);
@@ -163,34 +52,37 @@ export default function ValidationDashboard({
   const [hoveredScatterPoint, setHoveredScatterPoint] = useState(null);
   const [hoveredHistBin, setHoveredHistBin] = useState(null);
 
-  // Initialize validation data & fetch benchmark tables on mount
+  // Fetch benchmark tables on mount. Current-image metrics need a real reference raster.
   useEffect(() => {
-    const initial = computeSyntheticValidation(scaleFactor || 10.0, 0.055);
-    setValidationResult((prev) => prev || {
-      ...initial,
-      groundTruthImage: estimatedDepthData?.depth_map,
-      estimatedImage: estimatedDepthData?.depth_map,
-      errorHeatmapImage: null,
-      datasetName: "ISRO Planetary Benchmark (Reference DEM)",
-    });
+    setValidationResult(null);
 
     apiFetch("/api/benchmarks")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data?.benchmarks && Array.isArray(data.benchmarks)) {
-          setBenchmarks(data.benchmarks);
+          setBenchmarks(normalizeBenchmarkRows(data.benchmarks));
         }
       })
       .catch(() => {
-        // Use default benchmark tables
+        setBenchmarks([]);
       });
   }, [scaleFactor, estimatedDepthData]);
 
   // ── Handle Ground Truth Upload ─────────────────────────────────────────
   const runValidation = useCallback(
-    async (file, isSample = false) => {
+    async (file, previewUrl) => {
+      if (!file) {
+        setError("Upload a ground-truth raster before validating.");
+        return;
+      }
+      if (!estimatedDepthData?.depth_map) {
+        setError("Estimate an image before validating it against ground truth.");
+        return;
+      }
+
       setLoading(true);
       setError(null);
+      setValidationResult(null);
 
       try {
         const formData = new FormData();
@@ -207,37 +99,52 @@ export default function ValidationDashboard({
           body: formData,
         });
 
-        if (res.ok) {
-          const data = await res.json();
-          setValidationResult(data);
-        } else {
-          // Fallback calculation for rich client demonstration
-          const fallbackData = computeSyntheticValidation(scaleFactor, 0.065);
-          setValidationResult({
-            ...fallbackData,
-            groundTruthImage: groundTruthPreview || estimatedDepthData?.depth_map,
-            estimatedImage: estimatedDepthData?.depth_map,
-            errorHeatmapImage: null,
-            datasetName: file?.name || "Uploaded Reference DEM",
-          });
-        }
-      } catch (err) {
-      if (err.status === 401) return;
-      setError(err.message);
-        // Generate robust fallback on connection refusal / dev mode
-        const fallbackData = computeSyntheticValidation(scaleFactor, 0.065);
+        const data = await res.json();
+        const rawMetrics = data.metrics || {};
+        const regression = data.scatter?.regression || rawMetrics.regression || {};
+        const scatterPoints = (data.scatterPoints ?? data.scatter?.points ?? []).map((point) => {
+          const gt = asFiniteNumber(point.gt ?? point.ground_truth);
+          const est = asFiniteNumber(point.est ?? point.estimated ?? point.predicted);
+          return {
+            gt,
+            est,
+            error: asFiniteNumber(point.error) ?? (gt !== null && est !== null ? est - gt : null),
+          };
+        }).filter((point) => point.gt !== null && point.est !== null && point.error !== null);
+        const histogram = (data.histogram ?? data.error_heatmap?.error_histogram ?? []).map((bin) => ({
+          binStart: asFiniteNumber(bin.binStart ?? bin.bin_start) ?? 0,
+          binEnd: asFiniteNumber(bin.binEnd ?? bin.bin_end) ?? 0,
+          count: asFiniteNumber(bin.count) ?? 0,
+          percentage: asFiniteNumber(bin.percentage) ?? 0,
+        }));
+
         setValidationResult({
-          ...fallbackData,
-          groundTruthImage: groundTruthPreview || estimatedDepthData?.depth_map,
-          estimatedImage: estimatedDepthData?.depth_map,
-          errorHeatmapImage: null,
-          datasetName: file?.name || (isSample ? "ISRO High-Res DEM Reference" : "Local Reference DEM"),
+          ...data,
+          metrics: {
+            ...rawMetrics,
+            absRel: rawMetrics.absRel ?? rawMetrics.abs_rel,
+            sqRel: rawMetrics.sqRel ?? rawMetrics.sq_rel,
+            delta1: rawMetrics.delta1 ?? rawMetrics.delta_1,
+            delta2: rawMetrics.delta2 ?? rawMetrics.delta_2,
+            delta3: rawMetrics.delta3 ?? rawMetrics.delta_3,
+            r2: rawMetrics.r2 ?? rawMetrics.r_squared ?? regression.r_squared,
+            regression,
+          },
+          scatterPoints,
+          histogram,
+          groundTruthImage: previewUrl,
+          estimatedImage: estimatedDepthData.depth_map,
+          errorHeatmapImage: data.error_heatmap?.error_heatmap_base64 ?? null,
+          errorStd: asFiniteNumber(data.error_heatmap?.std_error),
+          datasetName: file.name,
         });
+      } catch (err) {
+        if (err.status !== 401) setError(err.message);
       } finally {
         setLoading(false);
       }
     },
-    [scaleFactor, model, estimatedDepthData, groundTruthPreview]
+    [scaleFactor, model, estimatedDepthData]
   );
 
   const handleFile = (file) => {
@@ -245,7 +152,7 @@ export default function ValidationDashboard({
     setGroundTruthFile(file);
     const objectUrl = URL.createObjectURL(file);
     setGroundTruthPreview(objectUrl);
-    runValidation(file);
+    runValidation(file, objectUrl);
   };
 
   const handleDrop = (e) => {
@@ -253,13 +160,6 @@ export default function ValidationDashboard({
     setDragActive(false);
     const file = e.dataTransfer?.files?.[0];
     if (file) handleFile(file);
-  };
-
-  const handleLoadSample = (sampleName) => {
-    const fakeFile = new File(["sample"], `${sampleName}.dem`, { type: "image/png" });
-    setGroundTruthFile(fakeFile);
-    setGroundTruthPreview(null);
-    runValidation(fakeFile, true);
   };
 
   // Filter benchmarks by dataset category
@@ -368,7 +268,7 @@ export default function ValidationDashboard({
                 Change File
                 <input
                   type="file"
-                  accept="image/*,.dem,.tif,.tiff,.npy"
+                  accept="image/png,image/jpeg,image/webp,image/tiff,.tif,.tiff"
                   onChange={(e) => handleFile(e.target.files?.[0])}
                   hidden
                 />
@@ -379,13 +279,13 @@ export default function ValidationDashboard({
               <span className="gt-icon">📥</span>
               <div className="prompt-text">
                 <strong>Upload Ground Truth DEM / Heightmap</strong>
-                <p>Drag & drop GeoTIFF, DEM, PNG, or LiDAR raster for instant validation</p>
+                <p>Drag & drop a ground-truth GeoTIFF or image raster for validation</p>
               </div>
               <label className="browse-gt-btn">
                 Browse DEM File
                 <input
                   type="file"
-                  accept="image/*,.dem,.tif,.tiff,.npy"
+                  accept="image/png,image/jpeg,image/webp,image/tiff,.tif,.tiff"
                   onChange={(e) => handleFile(e.target.files?.[0])}
                   hidden
                 />
@@ -396,30 +296,8 @@ export default function ValidationDashboard({
 
         {/* Preset Sample Quick-Loader */}
         <div className="sample-gt-presets">
-          <span className="presets-title">⚡ Or test with standard reference DEMs:</span>
-          <div className="preset-chip-list">
-            <button
-              className="preset-chip-btn"
-              onClick={() => handleLoadSample("ISRO_Lunar_Crater_DEM_HighRes")}
-              disabled={loading}
-            >
-              🚀 ISRO Lunar Crater DEM
-            </button>
-            <button
-              className="preset-chip-btn"
-              onClick={() => handleLoadSample("Urban_LiDAR_Point_Surface")}
-              disabled={loading}
-            >
-              🏙 Urban LiDAR Reference
-            </button>
-            <button
-              className="preset-chip-btn"
-              onClick={() => handleLoadSample("NYUv2_Kinect_Depth_GT")}
-              disabled={loading}
-            >
-              🏢 NYUv2 Depth Reference
-            </button>
-          </div>
+          <span className="presets-title">Reference data</span>
+          <p>No ground-truth DEMs are bundled. Upload a reference raster to calculate metrics for this image.</p>
         </div>
       </div>
 
@@ -438,7 +316,7 @@ export default function ValidationDashboard({
               </div>
               <div className="vmetric-body">
                 <span className="vmetric-value text-green">
-                  {typeof validationResult.metrics?.rmse === "number" ? validationResult.metrics.rmse.toFixed(3) : "0.285"} <small>m</small>
+                  {typeof validationResult.metrics?.rmse === "number" ? validationResult.metrics.rmse.toFixed(3) : "—"} <small>m</small>
                 </span>
                 <span className="vmetric-sub">Target: &lt; 0.50m (Pass)</span>
               </div>
@@ -452,7 +330,7 @@ export default function ValidationDashboard({
               </div>
               <div className="vmetric-body">
                 <span className="vmetric-value text-cyan">
-                  {typeof validationResult.metrics?.mae === "number" ? validationResult.metrics.mae.toFixed(3) : "0.174"} <small>m</small>
+                  {typeof validationResult.metrics?.mae === "number" ? validationResult.metrics.mae.toFixed(3) : "—"} <small>m</small>
                 </span>
                 <span className="vmetric-sub">Average deviation</span>
               </div>
@@ -468,10 +346,12 @@ export default function ValidationDashboard({
                 <span className="vmetric-value text-purple">
                   {typeof (validationResult.metrics?.absRel ?? validationResult.metrics?.abs_rel) === "number"
                     ? (validationResult.metrics?.absRel ?? validationResult.metrics?.abs_rel).toFixed(4)
-                    : "0.0460"}
+                    : "—"}
                 </span>
                 <span className="vmetric-sub">
-                  {(Number(validationResult.metrics?.absRel ?? validationResult.metrics?.abs_rel ?? 0.046) * 100).toFixed(1)}% Relative
+                  {typeof (validationResult.metrics?.absRel ?? validationResult.metrics?.abs_rel) === "number"
+                    ? `${((validationResult.metrics?.absRel ?? validationResult.metrics?.abs_rel) * 100).toFixed(1)}% Relative`
+                    : "—"}
                 </span>
               </div>
             </div>
@@ -486,7 +366,7 @@ export default function ValidationDashboard({
                 <span className="vmetric-value">
                   {typeof (validationResult.metrics?.sqRel ?? validationResult.metrics?.sq_rel) === "number"
                     ? (validationResult.metrics?.sqRel ?? validationResult.metrics?.sq_rel).toFixed(4)
-                    : "0.0120"}
+                    : "—"}
                 </span>
                 <span className="vmetric-sub">Squared residual penalty</span>
               </div>
@@ -502,7 +382,7 @@ export default function ValidationDashboard({
                 <span className="vmetric-value text-green">
                   {typeof (validationResult.metrics?.delta1 ?? validationResult.metrics?.delta_1) === "number"
                     ? (validationResult.metrics?.delta1 ?? validationResult.metrics?.delta_1).toFixed(1)
-                    : "98.4"}%
+                    : "—"}%
                 </span>
                 <span className="vmetric-sub">Threshold 1.25x</span>
               </div>
@@ -518,7 +398,7 @@ export default function ValidationDashboard({
                 <span className="vmetric-value text-cyan">
                   {typeof (validationResult.metrics?.delta2 ?? validationResult.metrics?.delta_2) === "number"
                     ? (validationResult.metrics?.delta2 ?? validationResult.metrics?.delta_2).toFixed(1)
-                    : "99.6"}%
+                    : "—"}%
                 </span>
                 <span className="vmetric-sub">Threshold 1.56x</span>
               </div>
@@ -534,7 +414,7 @@ export default function ValidationDashboard({
                 <span className="vmetric-value">
                   {typeof (validationResult.metrics?.delta3 ?? validationResult.metrics?.delta_3) === "number"
                     ? (validationResult.metrics?.delta3 ?? validationResult.metrics?.delta_3).toFixed(1)
-                    : "99.9"}%
+                    : "—"}%
                 </span>
                 <span className="vmetric-sub">Threshold 1.95x</span>
               </div>
@@ -550,7 +430,7 @@ export default function ValidationDashboard({
                 <span className="vmetric-value text-purple">
                   {typeof (validationResult.metrics?.r2 ?? validationResult.metrics?.r_squared) === "number"
                     ? (validationResult.metrics?.r2 ?? validationResult.metrics?.r_squared).toFixed(3)
-                    : "0.982"}
+                    : "—"}
                 </span>
                 <span className="vmetric-sub">Variance explained</span>
               </div>
@@ -570,9 +450,9 @@ export default function ValidationDashboard({
                   <small>{model}</small>
                 </div>
                 <div className="tri-img-box">
-                  {estimatedDepthData?.depth_map ? (
+                  {validationResult.errorHeatmapImage ? (
                     <img
-                      src={`data:image/png;base64,${estimatedDepthData.depth_map}`}
+                      src={`data:image/png;base64,${validationResult.errorHeatmapImage}`}
                       alt="Estimated Depth"
                       className="tri-img"
                     />
@@ -645,9 +525,9 @@ export default function ValidationDashboard({
                     <strong>Predicted vs Ground Truth Scatter</strong>
                   </div>
                   <span className="r2-pill">
-                    R² = {validationResult.metrics.r2} · y ={" "}
-                    {validationResult.metrics.regression.slope}x +{" "}
-                    {validationResult.metrics.regression.intercept}
+                    R² = {typeof validationResult.metrics.r2 === "number" ? validationResult.metrics.r2.toFixed(3) : "—"} · y ={" "}
+                    {typeof validationResult.metrics.regression?.slope === "number" ? validationResult.metrics.regression.slope.toFixed(3) : "—"}x +{" "}
+                    {typeof validationResult.metrics.regression?.intercept === "number" ? validationResult.metrics.regression.intercept.toFixed(3) : "—"}
                   </span>
                 </div>
 
@@ -748,8 +628,8 @@ export default function ValidationDashboard({
                     <strong>Residual Error Distribution (|Δh|)</strong>
                   </div>
                   <span className="hist-stat-pill">
-                    MAE = {validationResult.metrics.mae}m · Std ={" "}
-                    {(validationResult.metrics.rmse * 0.85).toFixed(2)}m
+                    MAE = {typeof validationResult.metrics.mae === "number" ? `${validationResult.metrics.mae.toFixed(3)}m` : "—"} · Std ={" "}
+                    {typeof validationResult.errorStd === "number" ? `${validationResult.errorStd.toFixed(2)}m` : "—"}
                   </span>
                 </div>
 
@@ -823,8 +703,7 @@ export default function ValidationDashboard({
           <div className="table-title-group">
             <h3>🏆 Standard Dataset Benchmark Comparisons</h3>
             <p>
-              Verified empirical benchmark performance across standard monocular depth
-              estimation datasets.
+              Reference figures are separate from this image's results. Upload a ground-truth raster to validate the current scene.
             </p>
           </div>
 
@@ -856,6 +735,9 @@ export default function ValidationDashboard({
               </tr>
             </thead>
             <tbody>
+              {filteredBenchmarks.length === 0 && (
+                <tr><td colSpan="7">No reference benchmark data is available.</td></tr>
+              )}
               {filteredBenchmarks.map((row, idx) => {
                 const isCurrent = isCurrentModel(row.model);
                 return (
@@ -873,20 +755,20 @@ export default function ValidationDashboard({
                       </div>
                     </td>
                     <td>
-                      <span className="metric-num text-green">{row.rmse.toFixed(3)}</span>
+                      <span className="metric-num text-green">{row.rmse === null ? "—" : row.rmse.toFixed(3)}</span>
                     </td>
                     <td>
-                      <span className="metric-num text-cyan">{row.mae.toFixed(3)}</span>
+                      <span className="metric-num text-cyan">{row.mae === null ? "—" : row.mae.toFixed(3)}</span>
                     </td>
                     <td>
-                      <span className="metric-num text-purple">{row.absRel.toFixed(3)}</span>
+                      <span className="metric-num text-purple">{row.absRel === null ? "—" : row.absRel.toFixed(3)}</span>
                     </td>
                     <td>
-                      <span className="metric-num bold">{(row.delta1 * 100).toFixed(1)}%</span>
+                      <span className="metric-num bold">{row.delta1 === null ? "—" : `${(row.delta1 * 100).toFixed(1)}%`}</span>
                     </td>
                     <td>
-                      <span className={`rank-badge ${row.rank.includes("Top 1%") ? "gold" : ""}`}>
-                        {row.rank}
+                      <span className={`rank-badge ${row.rank?.includes("Top 1%") ? "gold" : ""}`}>
+                        {row.rank || "Not reported"}
                       </span>
                     </td>
                   </tr>

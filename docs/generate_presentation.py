@@ -325,7 +325,7 @@ def build_presentation():
     add_card(s7, Inches(0.8), Inches(1.8), Inches(5.6), Inches(5.0), "🛰️ GeoTIFF & Orbital Metadata Extraction", [
         "GeoTIFF Tag Parsing: Automatic extraction of CRS, affine geo-transform, bounding coordinates, and radiometric bits.",
         "Sensor Ground Sample Distance (GSD): Computes pixel scale (e.g. 0.28m/px for Cartosat-3, 0.32m/px for Chandrayaan TMC-2).",
-        "Integrated Leaflet.js Map: Displays georeferenced satellite DEM overlays directly on global/lunar coordinate maps.",
+        "Coordinate Context: Displays CRS and parsed raster bounds when input georeferencing is available.",
         "ISRO Telemetry Presets: Pre-loaded orbital parameters for Cartosat-3, Chandrayaan-2, and Sentinel-2.",
     ], header_color=ACCENT_PURPLE)
 

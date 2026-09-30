@@ -1,0 +1,22 @@
+name: Supabase demo health check
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '37 4 */2 * *'
+permissions: {}
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Probe the database without reading user data
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+        shell: bash
+        run: |
+          test -n "$SUPABASE_URL" && test -n "$SUPABASE_PUBLISHABLE_KEY"
+          curl --fail --silent --show-error --max-time 30 \
+            "$SUPABASE_URL/rest/v1/rpc/depth_wizard_health" \
+            -H "apikey: $SUPABASE_PUBLISHABLE_KEY" \
+            -H 'Content-Type: application/json' -d '{}'

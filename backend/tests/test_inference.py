@@ -6,12 +6,12 @@ import time
 
 import numpy as np
 import pytest
-from fastapi.testclient import TestClient
-from PIL import Image
-
-from app.depth import DepthEstimator, colorize_depth
+from app import main
+from app.depth import DepthEstimator, colorize_depth, list_available_models
 from app.main import app
 from app.mesh import depth_to_point_cloud
+from fastapi.testclient import TestClient
+from PIL import Image
 
 
 @pytest.fixture
@@ -31,6 +31,62 @@ def test_procedural_inference(scene):
     assert positions.shape == colors.shape == (24 * 32, 3)
     assert np.isfinite(positions).all()
     assert ((colors >= 0) & (colors <= 1)).all()
+
+
+def test_available_models_separates_implementation_from_cached_weights(monkeypatch):
+    monkeypatch.setattr("app.depth._model_dependencies_installed", lambda model_type: True)
+    monkeypatch.setattr("app.depth._model_weights_cached", lambda model_id, info: False)
+    models = {entry["id"]: entry for entry in list_available_models()}
+    assert models["depth-anything-v2-small"]["available"] is True
+    assert models["depth-anything-v2-small"]["weights_cached"] is False
+    assert models["metric3d"]["available"] is False
+    assert models["metric3d"]["unavailable_reason"]
+    availability = {model_id: entry["available"] for model_id, entry in models.items()}
+    assert availability["procedural-fallback"] is True
+    assert availability["metric3d"] is False
+
+
+def test_failed_explicit_model_switch_keeps_actual_model(monkeypatch):
+    estimator = DepthEstimator("procedural-fallback")
+
+    def fail_load(self, hf_id, model_id):
+        raise OSError("weights unavailable")
+
+    monkeypatch.setattr(DepthEstimator, "_load_depth_anything", fail_load)
+    with pytest.raises(OSError, match="weights unavailable"):
+        estimator.load_model("depth-anything-v2-small")
+    assert estimator.model_id == "procedural-fallback"
+    assert estimator.model_name == "procedural-fallback"
+
+
+def test_unknown_estimator_id_does_not_run_procedural(scene):
+    estimator = DepthEstimator("procedural-fallback")
+    estimator.model_id = "not-a-registered-model"
+    with pytest.raises(RuntimeError, match="unknown model id"):
+        estimator.estimate(scene)
+
+
+def test_unimplemented_metric3d_is_not_advertised_or_substituted():
+    estimator = DepthEstimator("procedural-fallback")
+    with pytest.raises(NotImplementedError, match="metric3d.*not implemented"):
+        estimator.load_model("metric3d")
+    assert estimator.model_id == "procedural-fallback"
+
+
+def test_api_model_switch_reports_load_failure_without_replacing_estimator(monkeypatch):
+    current = DepthEstimator("procedural-fallback")
+    monkeypatch.setattr(main, "estimator", current)
+
+    def fail_init(self, model_id=None):
+        raise OSError("weights are not cached")
+
+    monkeypatch.setattr(DepthEstimator, "__init__", fail_init)
+    with pytest.raises(Exception) as exc_info:
+        main.get_estimator("depth-anything-v2-small")
+    assert getattr(exc_info.value, "status_code", None) == 503
+    assert "no alternate model was selected" in str(exc_info.value.detail)
+    assert main.estimator is current
+    assert current.model_id == "procedural-fallback"
 
 
 def test_estimate_payload_and_timings(owner, scene):

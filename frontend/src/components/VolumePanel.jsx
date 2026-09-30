@@ -103,6 +103,31 @@ function VolumePanel({
     };
   }, [relMetrics, scaleFactor, imageWidth, imageHeight]);
 
+  const normalizeVolumeData = (data) => ({
+    ...data,
+    max_height_m: Number(data.max_height_m ?? data.max_height_above_ground_m ?? data.peak_height_m ?? 0),
+    mean_height_m: Number(data.mean_height_m ?? data.mean_height_above_ground_m ?? 0),
+    layers: Array.isArray(data.layers)
+      ? data.layers
+      : Array.isArray(data.volume_by_layer)
+        ? data.volume_by_layer.map((layer, index, allLayers) => {
+            const topM = Number(layer.height_m ?? layer.topM ?? 0);
+            const bottomM = index > 0
+              ? Number(allLayers[index - 1].height_m ?? allLayers[index - 1].topM ?? 0)
+              : 0;
+            return {
+              layerIndex: Number(layer.layerIndex ?? layer.layer_index ?? index + 1),
+              rangeLabel: `${bottomM.toFixed(2)} - ${topM.toFixed(2)}m`,
+              bottomM,
+              topM,
+              volumeM3: Number(layer.volumeM3 ?? layer.layer_volume_m3 ?? 0),
+              cumulativeVolumeM3: Number(layer.cumulativeVolumeM3 ?? layer.cumulative_volume_m3 ?? 0),
+              percentOfTotal: Number(layer.percentOfTotal ?? layer.layer_percentage ?? 0),
+            };
+          })
+        : [],
+  });
+
   // ── Fetch Volume from API ────────────────────────────────────────────────
   const fetchVolumeData = useCallback(async () => {
     setIsLoadingVolume(true);
@@ -120,7 +145,7 @@ function VolumePanel({
 
       if (res.ok) {
         const data = await res.json();
-        setVolumeData(data);
+        setVolumeData(normalizeVolumeData(data));
       } else {
         setVolumeData(computedFallbackVolume);
       }
@@ -140,8 +165,21 @@ function VolumePanel({
   // Active volume dataset
   const activeVolume = volumeData || computedFallbackVolume;
 
-  // ── Compute Shadows (API + Client Raycasting Simulation) ──────────────────
-  const handleComputeShadows = async () => {
+  const renderShadowMap = useCallback((base64) => {
+    const canvas = shadowCanvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+
+    const image = new Image();
+    image.onload = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+    };
+    image.src = `data:image/png;base64,${base64}`;
+  }, []);
+
+  const computeShadowForAngles = useCallback(async (azimuth, elevation) => {
+    setRequestError(null);
     setIsComputingShadows(true);
     try {
       const res = await apiFetch("/api/volume/shadow", {
@@ -150,102 +188,36 @@ function VolumePanel({
         body: JSON.stringify({
           depth_map_b64: depthData?.depth_map || "",
           scale_factor: scaleFactor,
-          sun_azimuth_deg: sunAzimuth,
-          sun_elevation_deg: sunElevation,
+          sun_azimuth_deg: azimuth,
+          sun_elevation_deg: elevation,
         }),
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        setShadowResult(data);
-      } else {
-        simulateShadowMap();
+      const data = await res.json();
+      const coverage = Number(data.shadow_percentage ?? data.coverage_percent);
+      if (!Number.isFinite(coverage) || !data.shadow_map_base64) {
+        throw new Error("Shadow analysis returned incomplete data.");
       }
+
+      setShadowResult({
+        coverage_percent: coverage,
+        shadow_area_m2: Number(data.shadow_area_m2 ?? 0),
+        illuminated_area_m2: Number(data.illuminated_area_m2 ?? 0),
+        sun_vector: data.sun_params,
+      });
+      renderShadowMap(data.shadow_map_base64);
     } catch (err) {
-      setRequestError(err.message);
-      if (err.status === 401) return;
-      simulateShadowMap();
+      if (err.status !== 401) setRequestError(err.message);
     } finally {
       setIsComputingShadows(false);
     }
-  };
+  }, [depthData?.depth_map, scaleFactor, renderShadowMap]);
 
-  // ── Client Synthetic Shadow Raycaster ────────────────────────────────────
-  const simulateShadowMap = useCallback(() => {
-    const canvas = shadowCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+  const handleComputeShadows = () => computeShadowForAngles(sunAzimuth, sunElevation);
 
-    const w = canvas.width;
-    const h = canvas.height;
-    ctx.clearRect(0, 0, w, h);
-
-    const imgData = ctx.createImageData(w, h);
-    const data = imgData.data;
-
-    // Convert sun angles to directional vector
-    const azRad = (sunAzimuth * Math.PI) / 180;
-    const elRad = (sunElevation * Math.PI) / 180;
-
-    const sunDx = -Math.sin(azRad);
-    const sunDy = Math.cos(azRad);
-    const tanElev = Math.tan(Math.max(0.08, elRad));
-
-    let shadowPixelCount = 0;
-    const totalPixels = (w / 2) * (h / 2);
-
-    for (let y = 0; y < h; y += 2) {
-      const ny = (y / h - 0.5) * 2;
-      for (let x = 0; x < w; x += 2) {
-        const nx = (x / w - 0.5) * 2;
-        const dist = Math.sqrt(nx * nx + ny * ny);
-
-        // Synthetic elevation profile
-        const heightVal = Math.max(0, Math.exp(-Math.pow((dist - 0.35) / 0.15, 2)) * 0.9 + (1 - dist) * 0.3);
-
-        // Dot product between surface slope and sun vector
-        const lightDot = nx * sunDx + ny * sunDy;
-        const isSelfShadowed = lightDot > 0.15 * tanElev;
-        const isCastShadow = dist > 0.4 && lightDot > 0.05 * tanElev;
-
-        const inShadow = isSelfShadowed || isCastShadow;
-
-        if (inShadow) {
-          shadowPixelCount++;
-          for (let dy = 0; dy < 2; dy++) {
-            for (let dx = 0; dx < 2; dx++) {
-              if (y + dy < h && x + dx < w) {
-                const idx = ((y + dy) * w + (x + dx)) * 4;
-                data[idx] = 10;     // R
-                data[idx + 1] = 12; // G
-                data[idx + 2] = 20; // B
-                data[idx + 3] = 220; // Alpha (shadow mask)
-              }
-            }
-          }
-        }
-      }
-    }
-
-    ctx.putImageData(imgData, 0, 0);
-
-    const coveragePct = Math.min(85, Math.max(8, Math.round((shadowPixelCount / totalPixels) * 100)));
-    const totalArea = activeVolume?.total_area_m2 || 50000;
-    const shadowArea = Math.round(totalArea * (coveragePct / 100));
-
-    setShadowResult({
-      coverage_percent: coveragePct,
-      shadow_area_m2: shadowArea,
-      illuminated_area_m2: totalArea - shadowArea,
-      sun_vector: { sun_azimuth_deg: sunAzimuth, sun_elevation_deg: sunElevation },
-    });
-  }, [sunAzimuth, sunElevation, activeVolume]);
-
-  // Run initial shadow calculation
   useEffect(() => {
-    simulateShadowMap();
-  }, [simulateShadowMap]);
+    computeShadowForAngles(sunAzimuth, sunElevation);
+  }, [computeShadowForAngles]);
 
   // ── Cardinal direction helper for Azimuth ────────────────────────────────
   const getCompassHeading = (deg) => {

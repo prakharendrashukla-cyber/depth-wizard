@@ -1,7 +1,12 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { apiFetch } from "./api";
+import { cloudMode } from "./supabase/client";
+import CloudAuthProvider from "./supabase/CloudAuthProvider";
 const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
+  return cloudMode ? <CloudAuthProvider context={AuthContext}>{children}</CloudAuthProvider> : <LocalAuthProvider>{children}</LocalAuthProvider>;
+}
+function LocalAuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);

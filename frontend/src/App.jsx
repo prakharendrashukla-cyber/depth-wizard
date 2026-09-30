@@ -1,14 +1,15 @@
 import { useAuth } from "./AuthContext";
-const AnalysisHistory = lazy(() => import("./components/AnalysisHistory"));
 import { apiFetch } from "./api";
-import { useState, useEffect, useCallback, lazy, Suspense } from "react";
+import { cloudMode } from "./supabase/client";
+import { saveAnalysis, saveScale } from "./supabase/analyses";
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, lazy, Suspense } from "react";
+const AnalysisHistory = lazy(() => import("./components/AnalysisHistory"));
 import ImageUpload from "./components/ImageUpload";
 const SceneViewer = lazy(() => import("./components/SceneViewer"));
 import HeightOverlay from "./components/HeightOverlay";
 import GCPCalibration from "./components/GCPCalibration";
 const ContourOverlay = lazy(() => import("./components/ContourOverlay"));
 const VolumePanel = lazy(() => import("./components/VolumePanel"));
-const MapView = lazy(() => import("./components/MapView"));
 const ValidationDashboard = lazy(() => import("./components/ValidationDashboard"));
 const UncertaintyView = lazy(() => import("./components/UncertaintyView"));
 import ModelSelector from "./components/ModelSelector";
@@ -24,7 +25,6 @@ const RESULT_TABS = [
   { id: "3d",          label: "🌐 3D View",       icon: "🌐" },
   { id: "contour",     label: "🗺️ Contour",       icon: "🗺️" },
   { id: "volume",      label: "🏗️ Volume",        icon: "🏗️" },
-  { id: "map",         label: "🛰️ Map",           icon: "🛰️" },
   { id: "validation",  label: "📊 Validation",    icon: "📊" },
   { id: "uncertainty", label: "🔬 Uncertainty",   icon: "🔬" },
   { id: "satellite",   label: "📡 Satellite",     icon: "📡" },
@@ -95,9 +95,32 @@ async function compressImageForUpload(file) {
 }
 
 function App() {
-  const { user, logout } = useAuth();
+  const { user, logout, guest, leaveGuest } = useAuth();
   const [showHistory, setShowHistory] = useState(false);
   const [logoutError, setLogoutError] = useState("");
+  const [saveMessage, setSaveMessage] = useState("");
+  const [savedId, setSavedId] = useState(null);
+  const [includePly, setIncludePly] = useState(false);
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [sourceFile, setSourceFile] = useState(null);
+  const [scalePreset, setScalePreset] = useState("relative");
+  const [offlineDemo, setOfflineDemo] = useState(false);
+  async function openOfflineDemo() {
+    setLoading(true); setError(null);
+    try {
+      const response = await fetch("/demo/crater-analysis.json");
+      if (!response.ok) throw new Error("Offline demo file is unavailable. Keep the local frontend running.");
+      setResult(await response.json()); setScaleFactor(1); setScalePreset("relative");
+      setSavedId(null); setSourceFile(null); setOfflineDemo(true); setSaveMessage("");
+    } catch (err) { setError(err.message); }
+    finally { setLoading(false); }
+  }
+  async function saveCurrent(data, file) {
+    setSaveBusy(true); setSaveMessage("Saving private analysis...");
+    try { setSavedId(await saveAnalysis({ result: data, original: file, userId: user.id, includePly })); setSaveMessage("Saved to your private history."); }
+    catch (err) { setSaveMessage("Could not save: " + err.message); }
+    finally { setSaveBusy(false); }
+  }
   // ── Core state ─────────────────────────────────────────────────────────
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -110,11 +133,27 @@ function App() {
   // ── View state ─────────────────────────────────────────────────────────
   const [viewMode, setViewMode] = useState("split"); // "split" | "3d"
   const [activeTab, setActiveTab] = useState("3d");
+  const analysisTabsRef = useRef(null);
+  const tabAnchorTopRef = useRef(null);
   const [showCalibration, setShowCalibration] = useState(false);
   const [showPdfExport, setShowPdfExport] = useState(false);
   const [showDemoTour, setShowDemoTour] = useState(false);
   const [showVideoProcessor, setShowVideoProcessor] = useState(false);
   const [showBatchProcessor, setShowBatchProcessor] = useState(false);
+
+  const handleAnalysisTabChange = (tabId) => {
+    tabAnchorTopRef.current = analysisTabsRef.current?.getBoundingClientRect().top ?? null;
+    setActiveTab(tabId);
+  };
+
+  useLayoutEffect(() => {
+    const previousTop = tabAnchorTopRef.current;
+    const tabs = analysisTabsRef.current;
+    if (previousTop === null || !tabs) return;
+    const movement = tabs.getBoundingClientRect().top - previousTop;
+    if (Math.abs(movement) > 1) window.scrollBy(0, movement);
+    tabAnchorTopRef.current = null;
+  }, [activeTab]);
 
   // ── Model state ────────────────────────────────────────────────────────
   const [currentModel, setCurrentModel] = useState("depth-anything-v2-small");
@@ -131,15 +170,18 @@ function App() {
   }, []);
 
   // ── Image upload handler ───────────────────────────────────────────────
-  const handleUpload = async (file, modelOverride = null) => {
+  const handleUpload = async (file, modelOverride = null, { preserveResult = false } = {}) => {
     setLoading(true);
     setError(null);
-    setResult(null);
-    setMeasurement(null);
-    setShowCalibration(false);
-    setActiveTab("3d");
-
-    setScaleFactor(1.0);
+    if (!preserveResult) {
+      setResult(null);
+      setSavedId(null); setSaveMessage(""); setSourceFile(file); setScalePreset("relative");
+      setOfflineDemo(false);
+      setMeasurement(null);
+      setShowCalibration(false);
+      setActiveTab("3d");
+      setScaleFactor(1.0);
+    }
 
     try {
       // Compress huge camera photos in browser (e.g. 20MB -> 150KB) in ~20ms
@@ -162,38 +204,50 @@ function App() {
 
       const data = await res.json();
       setResult(data);
-      if (data.model_id) setCurrentModel(data.model_id);
+      if (data.model_id || modelOverride) setCurrentModel(data.model_id || modelOverride);
+      setSavedId(null); setSaveMessage(""); setSourceFile(file); setScalePreset("relative");
+      setOfflineDemo(false); setMeasurement(null); setShowCalibration(false); setActiveTab("3d");
+      setScaleFactor(1.0);
+      if (cloudMode && user) await saveCurrent(data, file);
+      return true;
     } catch (err) {
       setError(err.message || "Failed to process image.");
+      return false;
     } finally {
       setLoading(false);
     }
   };
 
   // ── Model change handler ───────────────────────────────────────────────
-  const handleModelChange = useCallback(async (modelId) => {
-    setCurrentModel(modelId);
-    // If we have a result, user needs to re-process to use new model
-  }, []);
+  const handleModelChange = async (modelId) => {
+    // Keep the prior result and model selected until the requested model
+    // finishes successfully, so a failed download never strands the user.
+    if (!sourceFile) {
+      if (result) {
+        setError("This result has no source image attached. Upload the image again to run a different model.");
+        return false;
+      }
+      setCurrentModel(modelId);
+      return true;
+    }
+    return handleUpload(sourceFile, modelId, { preserveResult: true });
+  };
 
   // ── GCP Calibration complete ───────────────────────────────────────────
   const handleCalibrationComplete = useCallback((newScale) => {
-    setScaleFactor(newScale);
+    setScaleFactor(newScale); setScalePreset("custom");
     setShowCalibration(false);
   }, []);
 
   // ── Demo tour sample loader ────────────────────────────────────────────
   const handleLoadDemoSample = useCallback(async (sampleId) => {
-    setShowDemoTour(false);
-    try {
-      const res = await apiFetch(`/api/samples/${sampleId}`);
-      if (!res.ok) return;
-      const blob = await res.blob();
-      const file = new File([blob], sampleId, { type: blob.type || "image/png" });
-      handleUpload(file);
-    } catch (err) {
-      console.error("Failed to load demo sample:", err);
-    }
+    const res = await apiFetch(`/api/samples/${encodeURIComponent(sampleId)}`);
+    if (!res.ok) throw new Error(`Could not load sample image (${res.status}).`);
+    const blob = await res.blob();
+    const file = new File([blob], sampleId, { type: blob.type || "image/png" });
+    const processed = await handleUpload(file);
+    if (!processed) throw new Error("Sample processing failed. Check the error message and retry.");
+    return true;
   }, [currentModel]);
 
   // ── Export Handlers ────────────────────────────────────────────────────
@@ -270,7 +324,6 @@ function App() {
 
   // ── Render ─────────────────────────────────────────────────────────────
   return (
-    <Suspense fallback={<p role="status">Loading view…</p>}>
     <div className="app">
       {/* ── Top Header ── */}
       <header className="app-header">
@@ -283,10 +336,22 @@ function App() {
             Single-View Monocular Height Estimation · 3D Reconstruction · Geospatial Intelligence
           </p>
           <div className="header-actions">
-            <span style={{ overflowWrap: "anywhere" }}>{user.email}</span>
-            <button className="header-btn" onClick={() => setShowHistory(true)}>My Analyses</button>
-            <button className="header-btn" onClick={() => logout().catch(err => setLogoutError(err.message))}>Logout</button>
+            <span style={{ overflowWrap: "anywhere" }}>{user?.email || user?.phone || "Guest · results are not saved"}</span>
+            {user && <button className="header-btn" onClick={() => setShowHistory(true)}>My Analyses</button>}
+            <button className="header-btn" onClick={() => guest ? leaveGuest() : logout().catch(err => setLogoutError(err.message))}>{guest ? "Sign in" : "Logout"}</button>
             {logoutError && <span role="alert">{logoutError}</span>}
+            {cloudMode && <button className="header-btn" disabled={loading || saveBusy} onClick={openOfflineDemo}>Open offline demo (precomputed)</button>}
+            {offlineDemo && <span role="status">Precomputed demo · model server not used · scale presets are illustrative</span>}
+            {cloudMode && user && <label><input type="checkbox" checked={includePly} disabled={loading || saveBusy} onChange={e => setIncludePly(e.target.checked)} /> Save PLY with next analysis</label>}
+            {cloudMode && user && <small>Private history keeps your last 20 analyses; older entries are removed.</small>}
+            {saveMessage && <span role="status">{saveMessage}</span>}
+            {cloudMode && user && result && !savedId && sourceFile && <button className="header-btn" disabled={saveBusy} onClick={() => saveCurrent(result, sourceFile)}>Retry saving</button>}
+            {cloudMode && savedId && <button className="header-btn" disabled={saveBusy} onClick={async () => {
+              setSaveBusy(true);
+              try { await saveScale(savedId, scaleFactor, scalePreset); setSaveMessage("Current scale saved."); }
+              catch (err) { setSaveMessage(err.message); }
+              finally { setSaveBusy(false); }
+            }}>Save current scale</button>}
             {backendHealth && (
               <div className="backend-badge">
                 <span className={`status-dot ${backendHealth.status === "ok" ? "online" : "offline"}`} />
@@ -309,7 +374,12 @@ function App() {
       {/* ── Main Workspace ── */}
       <main className="app-main">
         {!result ? (
-          <ImageUpload onUpload={handleUpload} loading={loading} error={error} />
+          <>
+            <div className="pre-upload-model-selector">
+              <ModelSelector currentModel={currentModel} onModelChange={handleModelChange} disabled={loading} />
+            </div>
+            <ImageUpload onUpload={handleUpload} loading={loading} error={error} />
+          </>
         ) : (
           <div className="result-view">
             {/* ── Actions & View Switcher Bar ── */}
@@ -335,6 +405,7 @@ function App() {
                 <ModelSelector
                   currentModel={currentModel}
                   onModelChange={handleModelChange}
+                  disabled={loading || (!!result && !sourceFile)}
                 />
               </div>
 
@@ -360,6 +431,8 @@ function App() {
                 </button>
               </div>
             </div>
+
+            {error && <p className="error-msg" role="alert">Model switch failed: {error} The previous result is still available; choose another model to retry.</p>}
 
             {/* ── GCP Calibration Panel (conditionally shown) ── */}
             {showCalibration && (
@@ -397,12 +470,12 @@ function App() {
             )}
 
             {/* ── Analysis Tabs ── */}
-            <div className="analysis-tabs">
+            <div className="analysis-tabs" ref={analysisTabsRef}>
               {RESULT_TABS.map((tab) => (
                 <button
                   key={tab.id}
                   className={`tab-btn ${activeTab === tab.id ? "active" : ""}`}
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={() => handleAnalysisTabChange(tab.id)}
                 >
                   {tab.label}
                 </button>
@@ -411,6 +484,7 @@ function App() {
 
             {/* ── Tab Content ── */}
             <div className="tab-content">
+              <Suspense fallback={<div className="panel-loading" role="status">Loading analysis panel…</div>}>
               {activeTab === "3d" && (
                 <>
                   <div className={`viewer-container ${viewMode === "3d" ? "full-height" : ""}`}>
@@ -423,7 +497,7 @@ function App() {
                   <HeightOverlay
                     data={result}
                     scaleFactor={scaleFactor}
-                    onScaleChange={(s) => setScaleFactor(s)}
+                    onScaleChange={(s, preset = "custom") => { setScaleFactor(s); setScalePreset(preset); }}
                     measurement={measurement}
                   />
                 </>
@@ -442,16 +516,6 @@ function App() {
                 <VolumePanel
                   depthData={result}
                   scaleFactor={scaleFactor}
-                  imageWidth={result.metadata?.processed_width}
-                  imageHeight={result.metadata?.processed_height}
-                />
-              )}
-
-              {activeTab === "map" && (
-                <MapView
-                  geoData={result.geo_metadata || null}
-                  depthMapBase64={result.depth_map}
-                  gcpPoints={[]}
                   imageWidth={result.metadata?.processed_width}
                   imageHeight={result.metadata?.processed_height}
                 />
@@ -483,16 +547,17 @@ function App() {
                   }}
                 />
               )}
+              </Suspense>
             </div>
           </div>
         )}
       </main>
 
-      {showHistory && <AnalysisHistory onClose={() => setShowHistory(false)} onOpen={data => {
-        setResult(data); setScaleFactor(1); setActiveTab("3d"); setShowHistory(false);
-      }} />}
+      {showHistory && <Suspense fallback={null}><AnalysisHistory onClose={() => setShowHistory(false)} onOpen={data => {
+        setResult(data); setOfflineDemo(false); setSavedId(data.analysis_id); setSourceFile(null); setScaleFactor(data.scale_factor || 1); setScalePreset(data.scale_preset || "relative"); setActiveTab("3d"); setShowHistory(false);
+      }} /></Suspense>}
       {/* ── Modals & Overlays ── */}
-      {showPdfExport && (
+      {showPdfExport && <Suspense fallback={null}>
         <PDFExport
           data={result}
           scaleFactor={scaleFactor}
@@ -500,7 +565,7 @@ function App() {
           isOpen={showPdfExport}
           onClose={() => setShowPdfExport(false)}
         />
-      )}
+      </Suspense>}
 
       {showDemoTour && (
         <DemoTour
@@ -517,7 +582,9 @@ function App() {
               <h3>📹 Video / Multi-Frame Processor</h3>
               <button className="modal-close" onClick={() => setShowVideoProcessor(false)}>✕</button>
             </div>
-            <VideoProcessor onVideoProcessed={() => setShowVideoProcessor(false)} />
+            <Suspense fallback={<div className="panel-loading" role="status">Loading video tools…</div>}>
+              <VideoProcessor onVideoProcessed={() => setShowVideoProcessor(false)} />
+            </Suspense>
           </div>
         </div>
       )}
@@ -529,12 +596,13 @@ function App() {
               <h3>📦 Batch Image Processor</h3>
               <button className="modal-close" onClick={() => setShowBatchProcessor(false)}>✕</button>
             </div>
-            <BatchProcessor onBatchComplete={(data) => { setResult(data); setScaleFactor(1); setShowBatchProcessor(false); }} />
+            <Suspense fallback={<div className="panel-loading" role="status">Loading batch tools…</div>}>
+              <BatchProcessor onBatchComplete={(data) => { setResult(data); setScaleFactor(1); setShowBatchProcessor(false); }} />
+            </Suspense>
           </div>
         </div>
       )}
     </div>
-    </Suspense>
   );
 }
 

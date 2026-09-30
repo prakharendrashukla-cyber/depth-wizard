@@ -14,9 +14,11 @@ Includes auto-model recommendation based on input type.
 import logging
 import os
 import threading
+from pathlib import Path
+from typing import Dict, List, Optional
+
 import numpy as np
 from PIL import Image, ImageFilter
-from typing import Optional, List, Dict
 
 logger = logging.getLogger(__name__)
 
@@ -105,11 +107,11 @@ MODEL_REGISTRY = {
     "metric3d": {
         "name": "Metric3D v2 Small",
         "hf_id": "JUGGHM/Metric3D-v2-Small",
-        "type": "metric3d",
+        "type": "unsupported",
         "speed": "medium",
         "accuracy": 4,
         "params": "85M",
-        "best_for": "Metric depth with camera intrinsics awareness. Good for calibrated setups.",
+        "best_for": "Not implemented by the installed Transformers model stack.",
     },
     "procedural-fallback": {
         "name": "Procedural Fallback",
@@ -140,31 +142,84 @@ def colorize_depth(depth: np.ndarray) -> Image.Image:
     return Image.fromarray(rgb)
 
 
-def list_available_models() -> List[Dict]:
-    """
-    Probe which models can actually be loaded on this system.
-    Returns a list of model info dicts with an 'available' flag.
-    """
+def _model_dependencies_installed(model_type: str) -> bool:
+    try:
+        import torch  # noqa: F401
+        if model_type in ("depth-anything", "zoedepth", "metric3d"):
+            import transformers  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def _model_weights_cached(model_id: str, info: Dict) -> bool:
+    """Return whether model weights are present locally, without contacting a hub."""
+    model_type = info["type"]
+    if model_type == "procedural":
+        return True
+    if model_type in ("depth-anything", "zoedepth", "metric3d"):
+        try:
+            from huggingface_hub import snapshot_download
+            snapshot = Path(snapshot_download(info["hf_id"], local_files_only=True))
+        except Exception:
+            return False
+        if not (snapshot / "config.json").is_file():
+            return False
+        if not any((snapshot / name).is_file() for name in (
+            "preprocessor_config.json", "processor_config.json"
+        )):
+            return False
+
+        if any((snapshot / name).is_file() for name in ("model.safetensors", "pytorch_model.bin")):
+            return True
+        for index_name in ("model.safetensors.index.json", "pytorch_model.bin.index.json"):
+            index_path = snapshot / index_name
+            if index_path.is_file():
+                try:
+                    import json
+                    shards = set(json.loads(index_path.read_text(encoding="utf-8"))["weight_map"].values())
+                    if shards and all((snapshot / shard).is_file() for shard in shards):
+                        return True
+                except (OSError, ValueError, KeyError, TypeError):
+                    continue
+        return False
+    if model_type == "midas":
+        try:
+            import torch
+            hub_dir = Path(torch.hub.get_dir())
+        except ImportError:
+            return False
+        repo_dirs = (hub_dir / "intel-isl_MiDaS_master", hub_dir / "intel-isl_MiDaS_main")
+        checkpoint = "midas_v21_small_256.pt" if model_id == "midas-small" else "dpt_large_384.pt"
+        return any((repo / "hubconf.py").is_file() for repo in repo_dirs) and (
+            hub_dir / "checkpoints" / checkpoint
+        ).is_file()
+    return False
+
+
+def list_available_models(current_model: Optional[str] = None) -> List[Dict]:
+    """List implemented models and report local weight availability separately."""
     results = []
     for model_id, info in MODEL_REGISTRY.items():
-        entry = {**info, "id": model_id, "available": False}
-
-        if info["type"] == "procedural":
-            entry["available"] = True
-        elif info["type"] in ("depth-anything", "zoedepth", "metric3d"):
-            try:
-                import transformers  # noqa: F401
-                import torch  # noqa: F401
-                entry["available"] = True
-            except ImportError:
-                pass
-        elif info["type"] == "midas":
-            try:
-                import torch  # noqa: F401
-                entry["available"] = True
-            except ImportError:
-                pass
-
+        supported = info["type"] in {"depth-anything", "midas", "zoedepth", "procedural"}
+        ready = info["type"] == "procedural" or (
+            supported and _model_dependencies_installed(info["type"])
+        )
+        cached = _model_weights_cached(model_id, info) if supported else False
+        if model_id == current_model and supported:
+            ready = cached = True
+        unavailable_reason = None
+        if not supported:
+            unavailable_reason = "Metric3D is not implemented by the installed Transformers model stack."
+        elif not ready:
+            unavailable_reason = "Required backend ML dependencies are not installed."
+        entry = {
+            **info,
+            "id": model_id,
+            "available": ready,
+            "weights_cached": cached,
+            "unavailable_reason": unavailable_reason,
+        }
         results.append(entry)
 
     return results
@@ -267,12 +322,12 @@ class DepthEstimator:
             self._load_midas(info.get("variant", "MiDaS_small"), model_id)
         elif model_type == "zoedepth":
             self._load_zoedepth(info["hf_id"], model_id)
-        elif model_type == "metric3d":
-            self._load_metric3d(info["hf_id"], model_id)
         elif model_type == "procedural":
             self.model_name = "procedural-fallback"
             self.model_id = model_id
             logger.info("Using procedural fallback (no ML)")
+        elif model_type == "unsupported":
+            raise NotImplementedError(f"The {model_id} model architecture is not implemented")
         else:
             raise ValueError(f"Unknown model type: {model_type}")
 
@@ -293,8 +348,8 @@ class DepthEstimator:
             pass
 
     def _load_depth_anything(self, hf_id: str, model_id: str):
-        from transformers import AutoImageProcessor, AutoModelForDepthEstimation
         import torch
+        from transformers import AutoImageProcessor, AutoModelForDepthEstimation
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -302,6 +357,7 @@ class DepthEstimator:
             self.processor = AutoImageProcessor.from_pretrained(hf_id, local_files_only=True)
             self.model = AutoModelForDepthEstimation.from_pretrained(hf_id, local_files_only=True).to(device)
         except Exception:
+            # Fetch only the model that the caller explicitly selected.
             self.processor = AutoImageProcessor.from_pretrained(hf_id)
             self.model = AutoModelForDepthEstimation.from_pretrained(hf_id).to(device)
 
@@ -333,8 +389,8 @@ class DepthEstimator:
     def _load_zoedepth(self, hf_id: str, model_id: str):
         """Load ZoeDepth metric depth model from HuggingFace."""
         try:
-            from transformers import AutoModelForDepthEstimation, AutoImageProcessor
             import torch
+            from transformers import AutoImageProcessor, AutoModelForDepthEstimation
 
             device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -353,29 +409,6 @@ class DepthEstimator:
         except Exception as exc:
             raise RuntimeError(f"Failed to load ZoeDepth: {exc}") from exc
 
-    def _load_metric3d(self, hf_id: str, model_id: str):
-        """Load Metric3D model from HuggingFace."""
-        try:
-            from transformers import AutoModelForDepthEstimation, AutoImageProcessor
-            import torch
-
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-
-            try:
-                self.processor = AutoImageProcessor.from_pretrained(hf_id, local_files_only=True)
-                self.model = AutoModelForDepthEstimation.from_pretrained(hf_id, local_files_only=True).to(device)
-            except Exception:
-                self.processor = AutoImageProcessor.from_pretrained(hf_id)
-                self.model = AutoModelForDepthEstimation.from_pretrained(hf_id).to(device)
-
-            self.model.eval()
-            self.model_name = MODEL_REGISTRY[model_id]["name"]
-            self.model_id = model_id
-            self._device = device
-            logger.info("Loaded %s on %s", self.model_name, device)
-        except Exception as exc:
-            raise RuntimeError(f"Failed to load Metric3D: {exc}") from exc
-
     # ── Inference ────────────────────────────────────────────────────
 
     def estimate(self, image: Image.Image) -> np.ndarray:
@@ -388,16 +421,20 @@ class DepthEstimator:
         Returns a float32 array of shape (H, W) with relative depth values
         (higher value = closer to camera).
         """
-        model_type = MODEL_REGISTRY.get(self.model_id, {}).get("type", "procedural")
+        info = MODEL_REGISTRY.get(self.model_id)
+        if info is None:
+            raise RuntimeError(f"Estimator has unknown model id: {self.model_id}")
+        model_type = info["type"]
 
         if model_type == "depth-anything":
             return self._run_depth_anything(image)
         elif model_type == "midas":
             return self._run_midas(image)
-        elif model_type in ("zoedepth", "metric3d"):
+        elif model_type == "zoedepth":
             return self._run_hf_depth(image)
-        else:
+        elif model_type == "procedural":
             return self._run_procedural(image)
+        raise RuntimeError(f"Model type is not implemented: {model_type}")
 
     def _run_depth_anything(self, image: Image.Image) -> np.ndarray:
         import torch

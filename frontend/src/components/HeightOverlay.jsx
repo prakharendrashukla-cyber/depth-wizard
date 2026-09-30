@@ -93,7 +93,7 @@ function HeightOverlay({ data, scaleFactor = 1.0, onScaleChange, measurement }) 
               <button
                 key={p.id}
                 className={`preset-pill-btn ${Math.abs(scaleFactor - p.scale) < 0.1 ? "active" : ""}`}
-                onClick={() => onScaleChange && onScaleChange(p.scale)}
+                onClick={() => onScaleChange && onScaleChange(p.scale, p.id)}
                 title={p.desc}
               >
                 {p.name}

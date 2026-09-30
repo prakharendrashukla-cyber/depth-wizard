@@ -9,7 +9,12 @@ venv/
 env/
 *.egg
 
-# Model weights / checkpoints (large files)
+# Test and coverage output
+.coverage
+coverage.xml
+htmlcov/
+
+# Model weights / checkpoints
 backend/weights/
 *.pt
 *.pth
@@ -19,6 +24,7 @@ backend/weights/
 # Node
 node_modules/
 frontend/dist/
+frontend/coverage/
 
 # IDE
 .vscode/
@@ -29,21 +35,41 @@ frontend/dist/
 # OS
 .DS_Store
 Thumbs.db
+Desktop.ini
 
-# Env
+# Environment files and secrets
 .env
-.env.local
+.env.*
+!.env.example
+!.env.*.example
+.env.*.local
+*.secret
+*.secret.*
+*.key
+*.pem
 
+# Local databases and runtime data
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
 backend/data/
 
 # Local checks and generated caches
 .scratch/
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
+.tox/
 
-# Downloaded tools and generated presentation/export binaries
-*.exe
-*.exe.download
+# Downloaded command-line binaries (keep source utilities in tools/)
+/tools/*.exe
+/tools/*.exe.download
+/tools/cloudflared
+
+# Generated presentation and archive exports
 *.pptx
 *.pdf
 *.zip

@@ -132,6 +132,12 @@
   gap: 1rem;
 }
 
+.pre-upload-model-selector {
+  width: 100%;
+  max-width: 1100px;
+  margin-bottom: 1rem;
+}
+
 /* ── Action & Switcher Bar ── */
 .actions-bar {
   display: flex;
@@ -281,6 +287,17 @@
 
 .tab-content {
   min-height: 200px;
+  overflow-anchor: none;
+}
+
+.panel-loading {
+  min-height: 520px;
+  display: grid;
+  place-items: center;
+  color: #8b949e;
+  background: #0d1117;
+  border: 1px solid #21262d;
+  border-radius: 10px;
 }
 
 /* ── 2D Comparison Strip ── */

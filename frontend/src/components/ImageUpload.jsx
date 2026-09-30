@@ -40,17 +40,19 @@ function ImageUpload({ onUpload, loading, error }) {
   const [preview, setPreview] = useState(null);
   const [samples, setSamples] = useState(DEFAULT_SAMPLES);
   const [loadingSample, setLoadingSample] = useState(null);
+  const [sampleError, setSampleError] = useState("");
   const [showCamera, setShowCamera] = useState(false);
 
-  // Attempt to load samples from backend
+  // Load every bundled sample so this gallery stays in sync with the backend.
   useEffect(() => {
     apiFetch("/api/samples")
-      .then((res) => (res.ok ? res.json() : null))
+      .then((res) => {
+        if (!res.ok) throw new Error(`Sample list request failed (${res.status}).`);
+        return res.json();
+      })
       .then((data) => {
         if (data?.samples && data.samples.length > 0) {
-          const excludedIds = new Set(["chandrayaan_lunar_surface.png", "disaster_area.png"]);
-          const filtered = data.samples.filter((s) => !excludedIds.has(s.filename));
-          const mapped = filtered.map((s) => ({
+          const mapped = data.samples.map((s) => ({
             id: s.filename,
             name: s.name,
             tag: s.name.toLowerCase().includes("crater") || s.name.toLowerCase().includes("lunar")
@@ -60,11 +62,11 @@ function ImageUpload({ onUpload, loading, error }) {
           }));
           // Merge backend samples with defaults (avoid duplicates)
           const ids = new Set(mapped.map((m) => m.id));
-          const merged = [...mapped, ...DEFAULT_SAMPLES.filter((d) => !ids.has(d.id) && !excludedIds.has(d.id))];
+          const merged = [...mapped, ...DEFAULT_SAMPLES.filter((d) => !ids.has(d.id))];
           setSamples(merged);
         }
       })
-      .catch(() => {});
+      .catch((err) => setSampleError(err.message || "Could not load the demo datasets."));
   }, []);
 
   const handleFile = useCallback(
@@ -89,15 +91,17 @@ function ImageUpload({ onUpload, loading, error }) {
 
   const handleSampleClick = async (sample) => {
     try {
+      setSampleError("");
       setLoadingSample(sample.id);
       const res = await apiFetch(sample.url);
-      if (!res.ok) throw new Error("Failed to fetch sample image");
+      if (!res.ok) throw new Error(`Failed to fetch ${sample.name} (${res.status}).`);
       const blob = await res.blob();
       const file = new File([blob], sample.id, { type: blob.type || "image/png" });
       setPreview({ type: "image", url: URL.createObjectURL(blob) });
-      onUpload(file);
+      await onUpload(file);
     } catch (err) {
       console.error(err);
+      setSampleError(err.message || "Could not load this demo dataset. Please retry.");
     } finally {
       setLoadingSample(null);
     }
@@ -188,6 +192,7 @@ function ImageUpload({ onUpload, loading, error }) {
         <div className="sample-gallery-header">
           <span>🎯 Test with bundled demo datasets:</span>
         </div>
+        {sampleError && <p className="error-msg" role="alert">{sampleError}</p>}
         <div className="sample-cards">
           {samples.map((s) => (
             <button

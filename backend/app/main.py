@@ -82,7 +82,16 @@ def get_estimator(model_id=None) -> DepthEstimator:
         raise HTTPException(400, "Unknown depth model")
     with estimator_lock:
         if estimator is None or (model_id and estimator.model_id != model_id):
-            candidate = DepthEstimator(model_id or os.getenv("DEPTH_MODEL") or None)
+            try:
+                candidate = DepthEstimator(model_id or os.getenv("DEPTH_MODEL") or None)
+            except Exception as exc:
+                logger.warning("Requested depth model %s failed to load", model_id, exc_info=exc)
+                if model_id:
+                    raise HTTPException(
+                        503,
+                        f"Model '{model_id}' could not be loaded; no alternate model was selected.",
+                    ) from exc
+                raise
             estimator = candidate
         return estimator
 
@@ -108,6 +117,14 @@ def timed_call(fn, *args):
     return result, time.perf_counter() - started
 
 
+def _png_data_url(pixels: np.ndarray) -> str:
+    """Encode an image array as a PNG data URL for browser rendering."""
+    buffer = io.BytesIO()
+    Image.fromarray(pixels).save(buffer, format="PNG")
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
 def get_batch_processor():
     """Get or create batch processor singleton."""
     global batch_processor
@@ -120,9 +137,13 @@ def get_batch_processor():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Start loading depth model in background thread without blocking server bind."""
-    configure_secret()
+    if os.getenv("AUTH_PROVIDER", "local") not in {"local", "supabase"}:
+        raise RuntimeError("AUTH_PROVIDER must be local or supabase")
+    if os.getenv("AUTH_PROVIDER", "local") == "local":
+        configure_secret()
     init_db()
-    create_first_admin()
+    if os.getenv("AUTH_PROVIDER", "local") == "local":
+        create_first_admin()
     track_task(asyncio.to_thread(get_estimator))
     cleanup = track_task(cleanup_jobs())
     yield
@@ -166,6 +187,10 @@ async def rewrite_api_prefix(request: Request, call_next):
         request.scope["path"] = path[4:]
     elif path == "/api":
         request.scope["path"] = "/"
+    if os.getenv("AUTH_PROVIDER", "local") == "supabase" and request.scope["path"].split("/")[1] in {"auth", "analyses", "batch"}:
+        # Supabase mode uses the SDK for private history. The batch UI calls
+        # /estimate per file. Never mix local cookie identities with cloud users.
+        return JSONResponse({"detail": "Use Supabase for saved history in cloud mode"}, status_code=404)
     if request.method not in {"GET", "HEAD", "OPTIONS"}:
         origin = request.headers.get("origin")
         same_origin = str(request.base_url).rstrip("/")
@@ -236,8 +261,8 @@ async def health():
 @app.get("/models")
 async def get_models():
     """List all available depth models with their capabilities."""
-    models = list_available_models()
     current = estimator.model_id if estimator else "loading"
+    models = list_available_models(current_model=current)
     return {
         "models": models,
         "current_model": current,
@@ -320,7 +345,14 @@ async def estimate_depth(
 
     # ── Depth estimation (Async Non-blocking) ────────────────────────
     t0 = time.time()
-    depth = await asyncio.to_thread(est.estimate, img)
+    try:
+        depth = await asyncio.to_thread(est.estimate, img)
+    except Exception as exc:
+        logger.exception("Depth inference failed using %s", est.model_id)
+        raise HTTPException(
+            503,
+            f"Model '{est.model_id}' failed during inference; no alternate model was used.",
+        ) from exc
     depth_time = time.time() - t0
     logger.info("Depth estimation: %.2fs", depth_time)
 
@@ -373,7 +405,8 @@ async def estimate_depth(
     if geo_metadata:
         response["geo_metadata"] = geo_metadata
 
-    response["analysis_id"] = save_analysis(db, user, response)
+    if os.getenv("AUTH_PROVIDER", "local") == "local":
+        response["analysis_id"] = save_analysis(db, user, response)
     return JSONResponse(content=response)
 
 
@@ -536,6 +569,13 @@ async def compute_shadow(req: ShadowRequest):
             sun_elevation_deg=req.sun_elevation_deg,
             scale_factor=req.scale_factor,
         )
+        shadow_mask = result.pop("shadow_mask")
+        pixel_area_m2 = float(result["sun_params"]["pixel_size_m"]) ** 2
+        shadow_area_m2 = float(np.count_nonzero(shadow_mask)) * pixel_area_m2
+        total_area_m2 = float(shadow_mask.size) * pixel_area_m2
+        result["coverage_percent"] = result["shadow_percentage"]
+        result["shadow_area_m2"] = round(shadow_area_m2, 2)
+        result["illuminated_area_m2"] = round(total_area_m2 - shadow_area_m2, 2)
         return JSONResponse(content=result)
     except HTTPException:
         raise
@@ -561,7 +601,31 @@ async def compute_uncertainty(image: UploadFile = File(...)):
         img = _resize_image(img, MAX_IMAGE_DIM)
 
         result = await asyncio.to_thread(_compute_uncertainty, img, est, num_passes=5)
-        return JSONResponse(content=result)
+        confidence = np.clip(np.asarray(result["confidence_map"], dtype=np.float32), 0.0, 1.0)
+
+        # Return browser-ready visualizations and scalar metrics. The numerical
+        # arrays from compute_uncertainty are intentionally kept server-side.
+        confidence_gray = np.round(confidence * 255).astype(np.uint8)
+        low = confidence < 0.5
+        heatmap = np.empty((*confidence.shape, 3), dtype=np.uint8)
+        heatmap[..., 0] = np.where(low, 245, np.round((1 - (confidence - 0.5) * 2) * 245))
+        heatmap[..., 1] = np.where(low, np.round(confidence * 460), 210)
+        heatmap[..., 2] = np.where(low, 30, 50)
+
+        unreliable_mask = np.zeros((*confidence.shape, 4), dtype=np.uint8)
+        unreliable_mask[confidence < 0.6] = [248, 81, 73, 180]
+        stats = result["confidence_stats"]
+        return JSONResponse(content={
+            "confidenceMapBase64": _png_data_url(heatmap),
+            "confidenceValuesBase64": _png_data_url(confidence_gray),
+            "unreliableMaskBase64": _png_data_url(unreliable_mask),
+            "stats": {
+                "meanConfidence": round(float(stats["mean"]) * 100, 1),
+                "minConfidence": round(float(stats["min"]) * 100, 1),
+                "maxConfidence": round(float(stats["max"]) * 100, 1),
+                "unreliableAreaPercent": round(float(np.mean(confidence < 0.6) * 100), 1),
+            },
+        })
     except HTTPException:
         raise
     except ValueError as exc:
@@ -599,15 +663,10 @@ async def validate_depth(
             gt_raw = await read_upload(ground_truth)
             gt_img = Image.open(io.BytesIO(gt_raw)).convert("L")
 
-        if est_img is None and gt_img is None:
-            raise ValueError("Must provide estimated depth or ground truth")
-
-        if gt_img is None:
-            # Self-reference with small perturbation for instant live benchmarking
-            gt_img = est_img.copy()
-
         if est_img is None:
-            est_img = gt_img.copy()
+            raise ValueError("Estimated depth map is required")
+        if gt_img is None:
+            raise ValueError("Ground-truth reference raster is required")
 
         # Resize GT to match estimated if needed
         if est_img.size != gt_img.size:

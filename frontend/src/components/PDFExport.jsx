@@ -1,4 +1,5 @@
 import { apiFetch } from "../api";
+import { escapeHtml } from "../safeHtml";
 import React, { useState, useMemo } from "react";
 import "./PDFExport.css";
 
@@ -76,7 +77,7 @@ function PDFExport({ data, scaleFactor = 1.0, model = "Depth Anything V2", isOpe
       <!DOCTYPE html>
       <html>
       <head>
-        <title>${reportTitle}</title>
+        <title>${escapeHtml(reportTitle)}</title>
         <style>
           body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -156,28 +157,28 @@ function PDFExport({ data, scaleFactor = 1.0, model = "Depth Anything V2", isOpe
             </div>
             <small style="color: #57606a;">Single-View Monocular Height & 3D Surface Elevation Report</small>
           </div>
-          <div class="badge">Scale: ${scaleFactor}x Metric</div>
+          <div class="badge">Scale: ${escapeHtml(scaleFactor)}x Metric</div>
         </div>
 
-        <h1>${reportTitle}</h1>
+        <h1>${escapeHtml(reportTitle)}</h1>
 
         <div class="meta-grid">
-          <div><strong>Model:</strong> ${model}</div>
-          <div><strong>Filename:</strong> ${data?.metadata?.filename || "scene.png"}</div>
+          <div><strong>Model:</strong> ${escapeHtml(model)}</div>
+          <div><strong>Filename:</strong> ${escapeHtml(data?.metadata?.filename || "scene.png")}</div>
           <div><strong>Generated:</strong> ${new Date().toUTCString()}</div>
-          <div><strong>Resolution:</strong> ${data?.metadata?.original_width || 0}x${data?.metadata?.original_height || 0}px</div>
-          <div><strong>Author:</strong> ${authorName}</div>
-          <div><strong>Point Count:</strong> ${data?.point_cloud?.count || data?.metadata?.num_points || "N/A"}</div>
+          <div><strong>Resolution:</strong> ${escapeHtml(data?.metadata?.original_width || 0)}x${escapeHtml(data?.metadata?.original_height || 0)}px</div>
+          <div><strong>Author:</strong> ${escapeHtml(authorName)}</div>
+          <div><strong>Point Count:</strong> ${escapeHtml(data?.point_cloud?.count || data?.metadata?.num_points || "N/A")}</div>
         </div>
 
         ${sections.inputAndDepth ? `
           <div class="images-container">
             <div class="img-card">
-              <img src="data:image/png;base64,${data?.original_image || ""}" alt="Input Monocular Image" />
+              <img src="data:image/jpeg;base64,${escapeHtml(data?.original_image || "")}" alt="Input Monocular Image" />
               <div class="img-label">Original Monocular 2D Input</div>
             </div>
             <div class="img-card">
-              <img src="data:image/png;base64,${data?.depth_map || ""}" alt="Estimated Depth Heatmap" />
+              <img src="data:image/png;base64,${escapeHtml(data?.depth_map || "")}" alt="Estimated Depth Heatmap" />
               <div class="img-label">Neural Topographic Depth Heatmap</div>
             </div>
           </div>
@@ -227,9 +228,9 @@ function PDFExport({ data, scaleFactor = 1.0, model = "Depth Anything V2", isOpe
           <h3>Inference & Processing Diagnostics</h3>
           <table>
             <tbody>
-              <tr><td>Depth Model Inference Time</td><td>${data?.metadata?.depth_time_s || "0.0"} s</td></tr>
-              <tr><td>Point Cloud Triangulation Time</td><td>${data?.metadata?.pointcloud_time_s || "0.0"} s</td></tr>
-              <tr><td>Height & Transect Analysis Time</td><td>${data?.metadata?.height_time_s || "0.0"} s</td></tr>
+              <tr><td>Depth Model Inference Time</td><td>${escapeHtml(data?.metadata?.depth_time_s || "0.0")} s</td></tr>
+              <tr><td>Point Cloud Triangulation Time</td><td>${escapeHtml(data?.metadata?.pointcloud_time_s || "0.0")} s</td></tr>
+              <tr><td>Height & Transect Analysis Time</td><td>${escapeHtml(data?.metadata?.height_time_s || "0.0")} s</td></tr>
             </tbody>
           </table>
         ` : ""}

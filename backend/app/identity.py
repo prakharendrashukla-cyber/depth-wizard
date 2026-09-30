@@ -50,6 +50,9 @@ def set_session(response, request, user):
                         secure=secure_cookie(request), samesite="lax", path="/")
 
 def get_current_user(request: Request, db: Session = Depends(get_db)):
+    if os.getenv("AUTH_PROVIDER", "local") == "supabase":
+        from app.supabase_identity import processing_identity
+        return processing_identity(request)
     token = request.cookies.get(COOKIE_NAME)
     if not token:
         raise HTTPException(401, "Please log in")

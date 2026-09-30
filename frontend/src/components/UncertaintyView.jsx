@@ -3,109 +3,12 @@ import { apiFetch } from "../api";
  * Depth Wizard — UncertaintyView Component
  *
  * Epistemic & Aleatoric Uncertainty Estimation Suite for Monocular Depth Maps.
- * Computes pixel-wise confidence maps using ensemble/Monte Carlo perturbation,
- * detects high-variance boundary regions, generates risk heatmaps,
- * and highlights unreliable areas (shadows, occlusion edges, far-field horizons).
+ * Computes pixel-wise confidence maps from repeated augmented image inference
+ * and highlights regions with low pass-to-pass confidence.
  */
 
-import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import "./UncertaintyView.css";
-
-/**
- * Generate a client-side synthetic confidence map and statistics from image base64
- * for testing and robust fallback when backend inference endpoint is offline.
- */
-function generateSyntheticConfidence(width = 480, height = 360) {
-  const totalPixels = width * height;
-  let sumConf = 0;
-  let minConf = 100;
-  let maxConf = 0;
-  let unreliableCount = 0;
-  const threshold = 60.0; // Cutoff for unreliable regions
-
-  // Create canvas to render gradient/edge-based confidence map
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d");
-  const imgData = ctx.createImageData(width, height);
-  const data = imgData.data;
-
-  // Create unreliable mask canvas (semi-transparent red)
-  const maskCanvas = document.createElement("canvas");
-  maskCanvas.width = width;
-  maskCanvas.height = height;
-  const maskCtx = maskCanvas.getContext("2d");
-  const maskImgData = maskCtx.createImageData(width, height);
-  const maskData = maskImgData.data;
-
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const idx = (y * width + x) * 4;
-
-      // Distance from center & simulated edge noise
-      const nx = (x / width - 0.5) * 2;
-      const ny = (y / height - 0.5) * 2;
-      const dist = Math.sqrt(nx * nx + ny * ny);
-
-      // Procedural features: higher certainty near center, lower near edges and synthetic depth steps
-      const stepPattern = Math.sin(x * 0.05) * Math.cos(y * 0.05);
-      let conf = 92.0 - dist * 25.0 + stepPattern * 12.0 + (Math.random() - 0.5) * 6.0;
-      conf = Math.max(15.0, Math.min(99.5, conf));
-
-      sumConf += conf;
-      if (conf < minConf) minConf = conf;
-      if (conf > maxConf) maxConf = conf;
-      if (conf < threshold) unreliableCount++;
-
-      // Color mapping: Red (low conf) -> Yellow (mid) -> Green (high conf)
-      const norm = conf / 100.0; // 0..1
-      let r, g, b;
-      if (norm < 0.5) {
-        // Red to Yellow
-        r = 245;
-        g = Math.round(norm * 2 * 230);
-        b = 30;
-      } else {
-        // Yellow to Green
-        r = Math.round((1 - (norm - 0.5) * 2) * 245);
-        g = 210;
-        b = 50;
-      }
-
-      data[idx] = r;
-      data[idx + 1] = g;
-      data[idx + 2] = b;
-      data[idx + 3] = 230;
-
-      // Unreliable region mask: bright red where conf < threshold
-      if (conf < threshold) {
-        maskData[idx] = 248; // Red
-        maskData[idx + 1] = 81;
-        maskData[idx + 2] = 73;
-        maskData[idx + 3] = 180; // 70% opacity
-      } else {
-        maskData[idx + 3] = 0;
-      }
-    }
-  }
-
-  ctx.putImageData(imgData, 0, 0);
-  maskCtx.putImageData(maskImgData, 0, 0);
-
-  return {
-    confidenceMapBase64: canvas.toDataURL("image/png"),
-    unreliableMaskBase64: maskCanvas.toDataURL("image/png"),
-    stats: {
-      meanConfidence: parseFloat((sumConf / totalPixels).toFixed(1)),
-      minConfidence: parseFloat(minConf.toFixed(1)),
-      maxConfidence: parseFloat(maxConf.toFixed(1)),
-      unreliableAreaPercent: parseFloat(((unreliableCount / totalPixels) * 100).toFixed(1)),
-      totalPixels,
-      unreliablePixels: unreliableCount,
-    },
-  };
-}
 
 export default function UncertaintyView({
   originalImageBase64 = null,
@@ -136,60 +39,90 @@ export default function UncertaintyView({
       : `data:image/png;base64,${depthMapBase64}`;
   }, [depthMapBase64]);
 
+  useEffect(() => {
+    const valuesSrc = uncertaintyData?.confidenceValuesBase64;
+    if (!valuesSrc) return;
+
+    const confidenceImage = new Image();
+    confidenceImage.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = confidenceImage.naturalWidth;
+      canvas.height = confidenceImage.naturalHeight;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      if (!ctx) return;
+      ctx.drawImage(confidenceImage, 0, 0);
+      const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const maskCanvas = document.createElement("canvas");
+      maskCanvas.width = canvas.width;
+      maskCanvas.height = canvas.height;
+      const maskCtx = maskCanvas.getContext("2d");
+      if (!maskCtx) return;
+      const mask = maskCtx.createImageData(canvas.width, canvas.height);
+      let unreliablePixels = 0;
+      for (let i = 0; i < pixels.data.length; i += 4) {
+        if (pixels.data[i] / 255 * 100 < threshold) {
+          mask.data[i] = 248;
+          mask.data[i + 1] = 81;
+          mask.data[i + 2] = 73;
+          mask.data[i + 3] = 180;
+          unreliablePixels++;
+        }
+      }
+      maskCtx.putImageData(mask, 0, 0);
+      const areaPercent = Number((unreliablePixels / (canvas.width * canvas.height) * 100).toFixed(1));
+      setUncertaintyData((current) => current?.confidenceValuesBase64 === valuesSrc
+        ? { ...current, unreliableMaskBase64: maskCanvas.toDataURL("image/png"), stats: { ...current.stats, unreliableAreaPercent: areaPercent } }
+        : current);
+    };
+    confidenceImage.src = valuesSrc;
+  }, [uncertaintyData?.confidenceValuesBase64, threshold]);
+
   // ── Compute Uncertainty Handler ─────────────────────────────────────────
   const handleComputeUncertainty = useCallback(async () => {
+    if (!originalImageBase64) {
+      setError("Process or upload an image before computing uncertainty.");
+      return;
+    }
     setLoading(true);
     setError(null);
-    setLoadingStep("Initializing Monte Carlo ensemble dropout passes (5x)...");
+    setLoadingStep("Preparing five augmented inference passes...");
+    const step1Timer = setTimeout(() => {
+      setLoadingStep("Perturbing image inputs and evaluating depth variance...");
+    }, 700);
+    const step2Timer = setTimeout(() => {
+      setLoadingStep("Computing pixel-wise confidence distribution...");
+    }, 1400);
 
     try {
-      // Animated step feedback
-      const step1Timer = setTimeout(() => {
-        setLoadingStep("Perturbing multiscale feature maps & evaluating depth variance...");
-      }, 700);
-
-      const step2Timer = setTimeout(() => {
-        setLoadingStep("Computing pixel-wise epistemic confidence distribution...");
-      }, 1400);
-
-      const payload = {
-        image: originalImageBase64,
-        depth_map: depthMapBase64,
-        num_passes: 5,
-        threshold: threshold,
-      };
+      const source = originalImageBase64.startsWith("data:")
+        ? originalImageBase64
+        : `data:image/png;base64,${originalImageBase64}`;
+      const imageBlob = await fetch(source).then((response) => response.blob());
+      const form = new FormData();
+      form.append("image", imageBlob, "scene.png");
 
       const res = await apiFetch("/api/uncertainty", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: form,
       });
 
-      clearTimeout(step1Timer);
-      clearTimeout(step2Timer);
-
-      if (res.ok) {
-        const data = await res.json();
-        setUncertaintyData(data);
-        if (onUncertaintyComputed) onUncertaintyComputed(data);
-      } else {
-        // Fallback calculation for reliable UI demonstration
-        const fallback = generateSyntheticConfidence(480, 360);
-        setUncertaintyData(fallback);
-        if (onUncertaintyComputed) onUncertaintyComputed(fallback);
+      const data = await res.json();
+      if (!data.confidenceMapBase64 || !data.confidenceValuesBase64 || !data.stats) {
+        throw new Error("The uncertainty service returned an incomplete result.");
       }
+      setUncertaintyData(data);
+      if (onUncertaintyComputed) onUncertaintyComputed(data);
     } catch (err) {
       if (err.status === 401) return;
       setError(err.message);
-      // Client-side fallback computation on network/dev mode
-      const fallback = generateSyntheticConfidence(480, 360);
-      setUncertaintyData(fallback);
-      if (onUncertaintyComputed) onUncertaintyComputed(fallback);
+      setUncertaintyData(null);
     } finally {
+      clearTimeout(step1Timer);
+      clearTimeout(step2Timer);
       setLoading(false);
       setLoadingStep("");
     }
-  }, [originalImageBase64, depthMapBase64, threshold, onUncertaintyComputed]);
+  }, [originalImageBase64, onUncertaintyComputed]);
 
   // Stats
   const stats = uncertaintyData?.stats;
@@ -204,7 +137,7 @@ export default function UncertaintyView({
             <h3>Confidence & Uncertainty Estimation</h3>
           </div>
           <p className="header-desc">
-            Multi-pass Monte Carlo inference highlights depth estimation reliability and masks occlusion boundaries.
+            Five augmented inference passes show where depth predictions vary across the input.
           </p>
         </div>
 
@@ -386,7 +319,7 @@ export default function UncertaintyView({
             <div className="legend-header">
               <span className="legend-label">Confidence Scale:</span>
               <span className="legend-status">
-                Mean Reliability: <strong>{stats?.meanConfidence ?? 87.5}%</strong>
+                Mean Reliability: <strong>{stats ? `${stats.meanConfidence}%` : "—"}</strong>
               </span>
             </div>
             <div className="gradient-bar-wrapper">
@@ -463,19 +396,19 @@ export default function UncertaintyView({
               <div className="diag-item">
                 <span className="diag-bullet text-purple">●</span>
                 <div className="diag-desc">
-                  <strong>Depth Discontinuities & Occlusions:</strong> High uncertainty concentrated along steep building edges and crater rim boundaries.
+                  <strong>Pass-to-pass disagreement:</strong> Lower confidence appears in red in the confidence map.
                 </div>
               </div>
               <div className="diag-item">
                 <span className="diag-bullet text-cyan">●</span>
                 <div className="diag-desc">
-                  <strong>Shadow & Low-Illumination Regions:</strong> Low contrast terrain pockets exhibit mild epistemic variance.
+                  <strong>Unreliable area:</strong> The red mask updates with the selected confidence cutoff.
                 </div>
               </div>
               <div className="diag-item">
                 <span className="diag-bullet text-green">●</span>
                 <div className="diag-desc">
-                  <strong>Planar Topography:</strong> High confidence (&gt;90%) across flat terrain, streets, and consistent textures.
+                  <strong>Interpretation:</strong> This measures consistency across augmented inputs; it is not a ground-truth accuracy score.
                 </div>
               </div>
             </div>
@@ -487,7 +420,7 @@ export default function UncertaintyView({
           <div className="empty-icon">🛡️</div>
           <h4>Estimate Prediction Confidence</h4>
           <p>
-            Click "Compute Uncertainty Map" to perform multi-pass Monte Carlo inference and evaluate depth reliability across the scene.
+            Click "Compute Uncertainty Map" to run five augmented inference passes and compare their depth predictions.
           </p>
           <button className="compute-btn large" onClick={handleComputeUncertainty}>
             ✨ Compute Uncertainty Map

@@ -2,7 +2,7 @@
 
 Depth Wizard is a hackathon prototype for single-image depth estimation, height analysis, and browser-based 3D point-cloud exploration. It uses FastAPI, React/Vite, Three.js, and SQLite.
 
-The app now requires an account for analysis operations and saves each successful single-image analysis to that user's history. Authentication uses Argon2 password hashes and a seven-day JWT in an HttpOnly, SameSite=Lax cookie.
+By default, local mode requires an account and saves each successful single-image analysis to SQLite history. Local authentication uses Argon2 password hashes and a seven-day JWT in an HttpOnly, SameSite=Lax cookie. For optional Supabase login, guest mode and private cloud history, follow [the Supabase guide](docs/SUPABASE.md).
 
 ## Windows setup
 
@@ -144,3 +144,10 @@ The viewer displays a point cloud with orbit controls and an automated flythroug
 The existing validation dashboard and presentation assets contain illustrative or synthetic benchmark claims. They are retained as prototype materials, not evidence of measured accuracy. The batch upload UI now reports actual processing errors rather than fabricating fallback results.
 
 Neural-model compatibility, GPU performance, and real-world accuracy must be evaluated separately with suitable reference imagery.
+## Optional Supabase cloud history
+
+See [the complete Supabase setup and demo guide](docs/SUPABASE.md) for optional login,
+guest mode, private saved analyses, rerunnable SQL, free-plan limits, backups and tests.
+Configuration templates are `frontend/.env.supabase.example` and `.env.example`;
+the SQL Editor script is `supabase/setup.sql`. Cloud credentials are not required
+for guest-only development. Existing local Auth/SQLite mode remains the default.

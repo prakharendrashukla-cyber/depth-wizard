@@ -56,7 +56,7 @@ def test_estimate_and_failed_switch(client):
     previous = main.estimator
     with patch.object(main, "DepthEstimator", side_effect=RuntimeError("secret internals")):
         r = client.post("/estimate", files={"image": ("x.png", png(), "image/png")}, data={"model": "midas-small"})
-    assert r.status_code == 500
+    assert r.status_code == 503
     assert "secret internals" not in r.text
     assert main.estimator is previous
 

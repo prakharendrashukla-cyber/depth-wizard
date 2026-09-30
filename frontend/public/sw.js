@@ -1,5 +1,5 @@
-const CACHE_NAME = "depth-wizard-v2";
-const ASSETS = ["/", "/index.html", "/manifest.json", "/icons/icon.svg"];
+const CACHE_NAME = "depth-wizard-v3";
+const ASSETS = ["/", "/index.html", "/manifest.json", "/icons/icon.svg", "/demo/crater-analysis.json"];
 self.addEventListener("install", event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS)));
   self.skipWaiting();
@@ -13,7 +13,7 @@ self.addEventListener("fetch", event => {
   const url = new URL(event.request.url);
   if (event.request.method !== "GET" || url.origin !== self.location.origin) return;
   const navigation = event.request.mode === "navigate";
-  const staticAsset = url.pathname.startsWith("/assets/") || url.pathname.startsWith("/icons/") ||
+  const staticAsset = url.pathname.startsWith("/assets/") || url.pathname.startsWith("/icons/") || url.pathname === "/demo/crater-analysis.json" ||
     ["/", "/index.html", "/manifest.json"].includes(url.pathname);
   if (url.pathname === "/api" || url.pathname.startsWith("/api/") ||
       (!navigation && !staticAsset)) return;

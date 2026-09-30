@@ -269,6 +269,7 @@ function SatelliteMetadata({
       },
     ];
   }, [processingTime, model]);
+  const totalLatencyMs = pipelineStages.reduce((total, stage) => total + stage.timeMs, 0);
 
   // ── Copy helper ──────────────────────────────────────────────────────────
   const copyToClipboard = (text, key) => {
@@ -370,7 +371,7 @@ function SatelliteMetadata({
             <div className="pipeline-section-header">
               <span className="pipeline-title">⚡ Monocular Processing Pipeline Architecture</span>
               <span className="pipeline-total-latency">
-                Total Latency: <strong>{processingTime || 85} ms</strong>
+                Total Latency: <strong>{totalLatencyMs} ms</strong>
               </span>
             </div>
 

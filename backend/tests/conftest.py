@@ -5,6 +5,9 @@ _TEST_ROOT = tempfile.TemporaryDirectory(prefix="depthwizard-tests-")
 os.environ["DATABASE_URL"] = "sqlite:///" + (Path(_TEST_ROOT.name) / "test.db").as_posix()
 os.environ["SECRET_KEY"] = "test-secret-only-not-for-production-123456789"
 os.environ["DEPTH_MODEL"] = "procedural-fallback"
+# Local auth tests must not inherit the developer's live Supabase settings.
+# Cloud identity tests explicitly opt in with their own monkeypatched config.
+os.environ["AUTH_PROVIDER"] = "local"
 import pytest
 from app import analyses
 from app import database

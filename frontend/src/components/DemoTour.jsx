@@ -221,6 +221,17 @@ const DEMO_GALLERY_SAMPLES = [
     gradient: "linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #020617 100%)",
     icon: "🏢",
   },
+  {
+    id: "test_city.png",
+    title: "Cityscape Skyview",
+    subtitle: "Urban Architecture • Skyline",
+    description: "A bundled city scene for testing building silhouettes and urban depth processing.",
+    badge: "Cityscape",
+    badgeType: "blue",
+    stats: "Bundled sample • Ready to process",
+    gradient: "linear-gradient(135deg, #1e293b 0%, #475569 50%, #0f172a 100%)",
+    icon: "🌆",
+  },
 ];
 
 /**
@@ -234,6 +245,7 @@ function DemoTour({ onLoadSample, isVisible = false, onClose }) {
   const [autoPlay, setAutoPlay] = useState(false);
   const [autoPlayProgress, setAutoPlayProgress] = useState(0);
   const [loadingSampleId, setLoadingSampleId] = useState(null);
+  const [sampleError, setSampleError] = useState("");
   const [activeTab, setActiveTab] = useState("guide"); // "guide" | "samples"
 
   const autoPlayTimerRef = useRef(null);
@@ -320,15 +332,18 @@ function DemoTour({ onLoadSample, isVisible = false, onClose }) {
 
   // ── Sample Load Trigger ──────────────────────────────────────────────────
   const handleLoadSample = async (sample) => {
-    if (!onLoadSample) return;
+    if (!onLoadSample || loadingSampleId) return;
+    setSampleError("");
     try {
       setLoadingSampleId(sample.id);
-      await onLoadSample(sample.id);
+      const loaded = await onLoadSample(sample.id);
+      if (loaded === false) throw new Error("Sample processing failed. Please retry.");
       if (onClose) {
         onClose();
       }
     } catch (err) {
       console.error("Error loading demo sample:", err);
+      setSampleError(err.message || "Could not load this demo dataset. Please retry.");
     } finally {
       setLoadingSampleId(null);
     }
@@ -388,6 +403,8 @@ function DemoTour({ onLoadSample, isVisible = false, onClose }) {
             </button>
           </div>
         </div>
+
+        {sampleError && <p className="error-msg" role="alert">{sampleError}</p>}
 
         {/* ── View Mode: Guided Walkthrough ──────────────────────────────── */}
         {activeTab === "guide" && (

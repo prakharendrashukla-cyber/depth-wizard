@@ -10,7 +10,7 @@ export default defineConfig({
     proxy: {
       // Proxy API calls to the FastAPI backend during dev
       "/api": {
-        target: "http://127.0.0.1:8000",
+        target: process.env.DEPTH_API_PROXY || "http://127.0.0.1:8000",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ""),
       },

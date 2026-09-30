@@ -3,12 +3,13 @@ import ReactDOM from "react-dom/client";
 import App from "./App.jsx";
 import { AuthProvider, useAuth } from "./AuthContext";
 import LoginPage from "./components/LoginPage";
-function AuthenticatedApp() {
-  const { user, loading } = useAuth();
-  if (loading) return <p role="status">Loading…</p>;
-  return user ? <App key={user.id} /> : <LoginPage />;
-}
 import "./index.css";
+
+function AuthenticatedApp() {
+  const { user, loading, guest, recovering } = useAuth();
+  if (loading) return <p role="status">Loading...</p>;
+  return !recovering && (user || guest) ? <App key={user?.id || "guest"} /> : <LoginPage />;
+}
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
