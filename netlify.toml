@@ -1,0 +1,33 @@
+[build]
+  base = "frontend"
+  command = "npm test && npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+  # Enables the existing guest entry and bundled precomputed demo.
+  # Live inference still requires VITE_API_BASE pointing to an HTTPS FastAPI host.
+  VITE_AUTH_PROVIDER = "supabase"
+
+# Keep missing API calls out of the SPA fallback. The external API is selected
+# at build time with VITE_API_BASE; no Python model runs on this static host.
+[[redirects]]
+  from = "/api/*"
+  to = "/api-unavailable.json"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache"

@@ -81,6 +81,9 @@ Use HTTPS on any hostname other than localhost: session cookies are Secure for r
 
 ## Sharing a demo
 
+For a GitHub-connected Netlify frontend/demo preview, see [Netlify deployment](docs/NETLIFY.md).
+Live image processing still needs a separate HTTPS Python backend.
+
 Start the app with `start.bat`, then run `share_online.bat`. It downloads the Windows x64 cloudflared executable from the official Cloudflare GitHub release into the ignored `tools/` directory when missing, then tunnels port 8000. Use the displayed HTTPS address; visitors must register or log in. Closing the tunnel stops public access.
 
 `create_clean_zip.bat` creates a source archive in the repository root, excluding environments, credentials, uploads, database files, downloaded tools, and model weights.

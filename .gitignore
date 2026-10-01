@@ -23,6 +23,8 @@ backend/weights/
 
 # Node
 node_modules/
+.netlify/
+.npm-cache/
 frontend/dist/
 frontend/coverage/
 
