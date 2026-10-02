@@ -3,11 +3,14 @@ import ReactDOM from "react-dom/client";
 import App from "./App.jsx";
 import { AuthProvider, useAuth } from "./AuthContext";
 import LoginPage from "./components/LoginPage";
+import PublicDemoApp from "./PublicDemoApp.jsx";
+import { publicDemoOnly } from "./runtimeConfig.js";
 import "./index.css";
 
 function AuthenticatedApp() {
   const { user, loading, guest, recovering } = useAuth();
   if (loading) return <p role="status">Loading...</p>;
+  if (publicDemoOnly) return <PublicDemoApp key={user?.id || "public"} />;
   return !recovering && (user || guest) ? <App key={user?.id || "guest"} /> : <LoginPage />;
 }
 

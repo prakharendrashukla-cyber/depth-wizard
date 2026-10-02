@@ -74,6 +74,10 @@ SAMPLE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file
 batch_processor = None
 
 
+def public_demo_only() -> bool:
+    return os.getenv("PUBLIC_DEMO_ONLY", "false").lower() == "true"
+
+
 def get_estimator(model_id=None) -> DepthEstimator:
     """Publish only fully loaded models; in-flight callers keep their old snapshot."""
     global estimator
@@ -144,7 +148,8 @@ async def lifespan(app: FastAPI):
     init_db()
     if os.getenv("AUTH_PROVIDER", "local") == "local":
         create_first_admin()
-    track_task(asyncio.to_thread(get_estimator))
+    if not public_demo_only():
+        track_task(asyncio.to_thread(get_estimator))
     cleanup = track_task(cleanup_jobs())
     yield
     cleanup.cancel()
@@ -187,6 +192,14 @@ async def rewrite_api_prefix(request: Request, call_next):
         request.scope["path"] = path[4:]
     elif path == "/api":
         request.scope["path"] = "/"
+    if public_demo_only():
+        blocked_roots = {"api", "auth", "analyses", "estimate", "export", "batch", "samples",
+                         "models", "calibrate", "volume", "contour", "validate", "uncertainty",
+                         "benchmarks", "docs", "redoc", "openapi.json"}
+        root = request.scope["path"].strip("/").split("/")[0]
+        if request.scope["api_request"] or root in blocked_roots or request.method not in {"GET", "HEAD"}:
+            return JSONResponse({"detail": "Cloud analysis is disabled on this public demo."}, status_code=403,
+                                headers={"Cache-Control": "no-store"})
     if os.getenv("AUTH_PROVIDER", "local") == "supabase" and request.scope["path"].split("/")[1] in {"auth", "analyses", "batch"}:
         # Supabase mode uses the SDK for private history. The batch UI calls
         # /estimate per file. Never mix local cookie identities with cloud users.
@@ -212,6 +225,7 @@ async def browser_config():
         "supabaseUrl": os.getenv("SUPABASE_URL", ""),
         "supabasePublishableKey": os.getenv("SUPABASE_PUBLISHABLE_KEY", ""),
         "supabaseGoogleEnabled": os.getenv("SUPABASE_GOOGLE_ENABLED", "false").lower() == "true",
+        "publicDemoOnly": public_demo_only(),
     }
     key = config["supabasePublishableKey"]
     if key.startswith("sb_secret_"):
@@ -273,6 +287,8 @@ def _decode_image(raw: bytes) -> Image.Image:
 
 @app.get("/health")
 async def health():
+    if public_demo_only():
+        return {"status": "ok", "mode": "public-demo", "cloud_analysis_enabled": False, "version": "1.0.0"}
     return {
         "status": "ok",
         "model": estimator.model_name if estimator else "loading",

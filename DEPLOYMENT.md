@@ -1,5 +1,24 @@
 # Current private deployment
 
+## Prepared public demo
+
+The requested public website uses `PUBLIC_DEMO_ONLY=true`. In this mode the
+frontend opens directly into the precomputed demo, with optional Supabase sign-in
+and access to the signed-in user's existing history. The 3D viewer, camera
+controls, browser measurements, scale presets, and depth PNG download run in the
+browser. There is no upload, new image processing, batch, or video processing.
+
+The backend rejects analysis and local history/auth API routes, including `/api/`
+aliases, for both guests and signed-in users. Model startup loading is skipped.
+The server's small `/health` response reports that cloud analysis is disabled.
+`PUBLIC_DEMO_ONLY` must remain enabled on future deployments while the website
+is public. Returning to full cloud analysis requires restoring private access
+first. Hosting and traffic may still incur charges even without model inference.
+
+The public access change is applied only after the demo revision is deployed and
+reviewed. Existing Supabase accounts, ownership rules, and private files are
+preserved. Ordinary Supabase sign-in is independent of the Cloud Run entry gate.
+
 - Google Cloud project: `project-f78febd0-7836-4470-8e4`
 - Cloud Run service: `depth-wizard`, region `asia-south1`
 - Service URL: https://depth-wizard-133290700595.asia-south1.run.app
