@@ -40,7 +40,7 @@ from fastapi import Depends, FastAPI, UploadFile, File, HTTPException, Form, Req
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from PIL import Image
 
 from app.depth import DepthEstimator, colorize_depth, list_available_models
@@ -203,6 +203,28 @@ async def rewrite_api_prefix(request: Request, call_next):
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
+
+@app.get("/app-config.js", include_in_schema=False)
+async def browser_config():
+    """Publish an explicit allowlist; credentials and database URLs stay private."""
+    config = {
+        "authProvider": os.getenv("AUTH_PROVIDER", "local"),
+        "supabaseUrl": os.getenv("SUPABASE_URL", ""),
+        "supabasePublishableKey": os.getenv("SUPABASE_PUBLISHABLE_KEY", ""),
+    }
+    key = config["supabasePublishableKey"]
+    if key.startswith("sb_secret_"):
+        raise HTTPException(503, "Use a Supabase publishable key")
+    if key and not key.startswith("sb_publishable_"):
+        # Legacy anon JWTs are public; reject a mistaken service-role JWT.
+        import jwt
+        try:
+            if jwt.decode(key, options={"verify_signature": False}).get("role") != "anon":
+                raise ValueError("Not an anon key")
+        except Exception as exc:
+            raise HTTPException(503, "Use a Supabase publishable key") from exc
+    return Response("window.__DEPTH_WIZARD_CONFIG__ = " + json.dumps(config) + ";",
+                    media_type="application/javascript", headers={"Cache-Control": "no-store"})
 
 def _pil_to_base64(img: Image.Image, fmt: str = "PNG", quality: int = 85) -> str:
     buf = io.BytesIO()
@@ -551,6 +573,7 @@ class ShadowRequest(BaseModel):
     sun_azimuth_deg: float = 180.0
     sun_elevation_deg: float = 45.0
     scale_factor: float = 1.0
+    pixel_size_m: Optional[float] = Field(default=None, gt=0, le=100000)
 
 
 @app.post("/volume/shadow", dependencies=[Depends(get_current_user)])
@@ -568,14 +591,17 @@ async def compute_shadow(req: ShadowRequest):
             sun_azimuth_deg=req.sun_azimuth_deg,
             sun_elevation_deg=req.sun_elevation_deg,
             scale_factor=req.scale_factor,
+            pixel_size_m=req.pixel_size_m if req.pixel_size_m is not None else 1.0,
         )
         shadow_mask = result.pop("shadow_mask")
-        pixel_area_m2 = float(result["sun_params"]["pixel_size_m"]) ** 2
-        shadow_area_m2 = float(np.count_nonzero(shadow_mask)) * pixel_area_m2
-        total_area_m2 = float(shadow_mask.size) * pixel_area_m2
+        shadow_pixels = int(np.count_nonzero(shadow_mask))
+        result["shadow_pixels"] = shadow_pixels
+        result["illuminated_pixels"] = int(shadow_mask.size) - shadow_pixels
+        result["horizontally_calibrated"] = req.pixel_size_m is not None
         result["coverage_percent"] = result["shadow_percentage"]
-        result["shadow_area_m2"] = round(shadow_area_m2, 2)
-        result["illuminated_area_m2"] = round(total_area_m2 - shadow_area_m2, 2)
+        pixel_area_m2 = req.pixel_size_m ** 2 if req.pixel_size_m is not None else None
+        result["shadow_area_m2"] = round(shadow_pixels * pixel_area_m2, 2) if pixel_area_m2 is not None else None
+        result["illuminated_area_m2"] = round(result["illuminated_pixels"] * pixel_area_m2, 2) if pixel_area_m2 is not None else None
         return JSONResponse(content=result)
     except HTTPException:
         raise

@@ -25,6 +25,7 @@ function VolumePanel({
   const [sunAzimuth, setSunAzimuth] = useState(135); // 0° to 360° (SE default)
   const [requestError, setRequestError] = useState(null);
   const [sunElevation, setSunElevation] = useState(35); // 0° to 90° (altitude above horizon)
+  const [pixelSize, setPixelSize] = useState("");
   const [isComputingShadows, setIsComputingShadows] = useState(false);
   const [isLoadingVolume, setIsLoadingVolume] = useState(false);
   const [hoveredLayer, setHoveredLayer] = useState(null);
@@ -190,6 +191,7 @@ function VolumePanel({
           scale_factor: scaleFactor,
           sun_azimuth_deg: azimuth,
           sun_elevation_deg: elevation,
+          pixel_size_m: pixelSize === "" ? null : Number(pixelSize),
         }),
       });
 
@@ -201,8 +203,11 @@ function VolumePanel({
 
       setShadowResult({
         coverage_percent: coverage,
-        shadow_area_m2: Number(data.shadow_area_m2 ?? 0),
-        illuminated_area_m2: Number(data.illuminated_area_m2 ?? 0),
+        shadow_area_m2: data.shadow_area_m2,
+        illuminated_area_m2: data.illuminated_area_m2,
+        shadow_pixels: data.shadow_pixels,
+        illuminated_pixels: data.illuminated_pixels,
+        calibrated: data.horizontally_calibrated === true,
         sun_vector: data.sun_params,
       });
       renderShadowMap(data.shadow_map_base64);
@@ -211,7 +216,7 @@ function VolumePanel({
     } finally {
       setIsComputingShadows(false);
     }
-  }, [depthData?.depth_map, scaleFactor, renderShadowMap]);
+  }, [depthData?.depth_map, scaleFactor, pixelSize, renderShadowMap]);
 
   const handleComputeShadows = () => computeShadowForAngles(sunAzimuth, sunElevation);
 
@@ -573,6 +578,12 @@ function VolumePanel({
 
             {/* Actions & Toggles */}
             <div className="shadow-actions-row">
+              <label>
+                Ground sampling distance (m/pixel, optional)
+                <input type="number" min="0.0001" max="100000" step="any" value={pixelSize}
+                  onChange={e => setPixelSize(e.target.value)} placeholder="Unknown" />
+                <small>Use the spacing of this depth raster. Without it, the simulation and coverage are illustrative.</small>
+              </label>
               <button
                 className="compute-shadow-btn"
                 onClick={handleComputeShadows}
@@ -633,11 +644,11 @@ function VolumePanel({
               <div className="shadow-stats-bar">
                 <div className="stat-chip">
                   <span className="stat-dot shadowed" />
-                  <span>Shadowed: <strong>{(shadowResult.shadow_area_m2 || 0).toLocaleString()} m²</strong> ({shadowResult.coverage_percent}%)</span>
+                  <span>Shadowed: <strong>{Number(shadowResult.calibrated ? shadowResult.shadow_area_m2 : shadowResult.shadow_pixels).toLocaleString()} {shadowResult.calibrated ? "m²" : "pixels"}</strong> ({shadowResult.coverage_percent}%)</span>
                 </div>
                 <div className="stat-chip">
                   <span className="stat-dot illuminated" />
-                  <span>Illuminated: <strong>{(shadowResult.illuminated_area_m2 || 0).toLocaleString()} m²</strong> ({100 - shadowResult.coverage_percent}%)</span>
+                  <span>Illuminated: <strong>{Number(shadowResult.calibrated ? shadowResult.illuminated_area_m2 : shadowResult.illuminated_pixels).toLocaleString()} {shadowResult.calibrated ? "m²" : "pixels"}</strong> ({(100 - shadowResult.coverage_percent).toFixed(2)}%)</span>
                 </div>
               </div>
             )}
