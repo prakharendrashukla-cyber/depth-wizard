@@ -2,7 +2,8 @@ export function authErrorMessage(error) {
   const code = error?.code;
   if (code === "invalid_credentials") return "Incorrect email or password. If signup failed earlier, choose Create an account and try again.";
   if (code === "email_not_confirmed") return "This account is awaiting email confirmation. Contact the project administrator if your confirmation email did not arrive.";
-  if (code === "over_email_send_rate_limit" || code === "over_request_rate_limit") return "Too many attempts. Wait a few minutes before trying again.";
+  if (code === "over_email_send_rate_limit") return "Email sending limit reached. The project administrator needs to check the signup settings.";
+  if (code === "over_request_rate_limit") return "Too many attempts. Wait a few minutes before trying again.";
   if (/error sending (confirmation|recovery|email)|smtp|gomail/i.test(error?.message || "")) {
     return "The email provider could not send this message. The project administrator needs to fix SMTP delivery.";
   }
@@ -13,7 +14,7 @@ export async function authenticateWithEmail(auth, mode, values, redirectTo) {
   const credentials = { email: values.email.trim(), password: values.password };
   const response = mode === "register"
     ? await auth.signUp({ ...credentials, options: {
-      data: { display_name: values.name.trim() }, emailRedirectTo: redirectTo,
+      data: { display_name: values.name?.trim() || credentials.email.split("@")[0] }, emailRedirectTo: redirectTo,
     } })
     : await auth.signInWithPassword(credentials);
   if (response.error) throw new Error(authErrorMessage(response.error));

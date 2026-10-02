@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase, requireSupabase, authRedirect } from "./client";
 import { authenticateWithEmail, authErrorMessage } from "./authActions";
+import { runtimeConfig } from "../runtimeConfig";
 
 export default function CloudAuthProvider({ context: Context, children }) {
   const [user, setUser] = useState(null);
@@ -64,5 +65,5 @@ export default function CloudAuthProvider({ context: Context, children }) {
   const leaveGuest = () => { sessionStorage.removeItem("depthwizard-guest"); setGuest(false); };
   return <Context.Provider value={{ user, loading, error, guest, recovering, authenticate, logout,
     resetPassword, updatePassword, enterGuest, leaveGuest, googleLogin,
-    googleEnabled: import.meta.env.VITE_SUPABASE_GOOGLE === "true", cloud: true }}>{children}</Context.Provider>;
+    googleEnabled: runtimeConfig.supabaseGoogleEnabled ?? (import.meta.env.VITE_SUPABASE_GOOGLE === "true"), cloud: true }}>{children}</Context.Provider>;
 }

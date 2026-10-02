@@ -211,6 +211,7 @@ async def browser_config():
         "authProvider": os.getenv("AUTH_PROVIDER", "local"),
         "supabaseUrl": os.getenv("SUPABASE_URL", ""),
         "supabasePublishableKey": os.getenv("SUPABASE_PUBLISHABLE_KEY", ""),
+        "supabaseGoogleEnabled": os.getenv("SUPABASE_GOOGLE_ENABLED", "false").lower() == "true",
     }
     key = config["supabasePublishableKey"]
     if key.startswith("sb_secret_"):
