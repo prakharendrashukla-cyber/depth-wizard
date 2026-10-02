@@ -1,12 +1,11 @@
 const API_BASE = (import.meta.env?.VITE_API_BASE || "/api").replace(/\/$/, "");
 import { supabase } from "./supabase/client.js";
-import { authProvider, publicDemoOnly } from "./runtimeConfig.js";
+import { authProvider } from "./runtimeConfig.js";
 export class ApiError extends Error {
   constructor(message, status) { super(message); this.name = "ApiError"; this.status = status; }
 }
 /** Cookie-aware transport; keeps the Response interface for binary exports. */
 export async function apiFetch(path, options = {}) {
-  if (publicDemoOnly) throw new ApiError("Cloud analysis is disabled on this public demo.", 403);
   const relative = path.replace(/^\/api(?=\/|$)/, "");
   if (!relative.startsWith("/") || relative.startsWith("//")) throw new Error("Use a relative API path");
   const headers = new Headers(options.headers);

@@ -2,12 +2,13 @@ import { useEffect, useState } from "react";
 import { supabase, requireSupabase, authRedirect } from "./client";
 import { authenticateWithEmail, authErrorMessage } from "./authActions";
 import { runtimeConfig } from "../runtimeConfig";
+const guestEnabled = runtimeConfig.analysisRequiresLogin !== true;
 
 export default function CloudAuthProvider({ context: Context, children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(Boolean(supabase));
   const [error, setError] = useState(null);
-  const [guest, setGuest] = useState(() => sessionStorage.getItem("depthwizard-guest") === "yes");
+  const [guest, setGuest] = useState(() => guestEnabled && sessionStorage.getItem("depthwizard-guest") === "yes");
   const [recovering, setRecovering] = useState(false);
   useEffect(() => {
     if (!supabase) return;
@@ -61,9 +62,12 @@ export default function CloudAuthProvider({ context: Context, children }) {
     const { error } = await requireSupabase().auth.signInWithOAuth({ provider: "google", options: { redirectTo: authRedirect() } });
     if (error) throw error;
   }
-  const enterGuest = () => { sessionStorage.setItem("depthwizard-guest", "yes"); setGuest(true); };
+  const enterGuest = () => {
+    if (!guestEnabled) return;
+    sessionStorage.setItem("depthwizard-guest", "yes"); setGuest(true);
+  };
   const leaveGuest = () => { sessionStorage.removeItem("depthwizard-guest"); setGuest(false); };
-  return <Context.Provider value={{ user, loading, error, guest, recovering, authenticate, logout,
+  return <Context.Provider value={{ user, loading, error, guest, guestEnabled, recovering, authenticate, logout,
     resetPassword, updatePassword, enterGuest, leaveGuest, googleLogin,
     googleEnabled: runtimeConfig.supabaseGoogleEnabled ?? (import.meta.env.VITE_SUPABASE_GOOGLE === "true"), cloud: true }}>{children}</Context.Provider>;
 }

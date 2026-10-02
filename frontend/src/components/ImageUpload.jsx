@@ -35,6 +35,28 @@ const ACCEPTED_FORMATS = [
   "video/mp4", "video/avi", "video/quicktime", "video/webm",
 ];
 
+function SampleThumbnail({ sample }) {
+  const [source, setSource] = useState(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    let objectUrl;
+    setSource(null);
+    apiFetch(sample.url, { signal: controller.signal })
+      .then((response) => response.blob())
+      .then((blob) => {
+        if (controller.signal.aborted) return;
+        objectUrl = URL.createObjectURL(blob);
+        setSource(objectUrl);
+      })
+      .catch(() => {});
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [sample.url]);
+  return source ? <img src={source} alt={sample.name} className="sample-thumb" /> : null;
+}
+
 function ImageUpload({ onUpload, loading, error }) {
   const [dragActive, setDragActive] = useState(false);
   const [preview, setPreview] = useState(null);
@@ -202,14 +224,7 @@ function ImageUpload({ onUpload, loading, error }) {
               disabled={loading}
             >
               <div className="sample-thumbnail-placeholder">
-                <img
-                  src={s.url}
-                  alt={s.name}
-                  className="sample-thumb"
-                  onError={(e) => {
-                    e.target.style.display = "none";
-                  }}
-                />
+                <SampleThumbnail sample={s} />
               </div>
               <div className="sample-card-info">
                 <span className="sample-name">{s.name}</span>

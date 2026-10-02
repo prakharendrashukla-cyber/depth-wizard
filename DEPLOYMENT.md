@@ -1,23 +1,60 @@
-# Current private deployment
+# Cloud Run deployment
 
-## Prepared public demo
+## Gateway audit - 3 October 2026
 
-The requested public website uses `PUBLIC_DEMO_ONLY=true`. In this mode the
-frontend opens directly into the precomputed demo, with optional Supabase sign-in
-and access to the signed-in user's existing history. The 3D viewer, camera
-controls, browser measurements, scale presets, and depth PNG download run in the
-browser. There is no upload, new image processing, batch, or video processing.
+The full pre-demo backend is serving 100% of traffic on
+`depth-wizard-00006-dqj`. IAM and IAP are both enabled. Its canonical URL is
+`https://depth-wizard-v2uqo4vytq-el.a.run.app`.
 
-The backend rejects analysis and local history/auth API routes, including `/api/`
-aliases, for both guests and signed-in users. Model startup loading is skipped.
-The server's small `/health` response reports that cloud analysis is disabled.
-`PUBLIC_DEMO_ONLY` must remain enabled on future deployments while the website
-is public. Returning to full cloud analysis requires restoring private access
-first. Hosting and traffic may still incur charges even without model inference.
+The separate `depth-wizard-gateway` service is public at
+`https://depth-wizard-gateway-133290700595.asia-south1.run.app`.
+Its runtime `PRIVATE_BACKEND_URL` uses the published backend URL
+`https://depth-wizard-133290700595.asia-south1.run.app`. The alternate canonical
+hostname rejected gateway calls at IAM before reaching IAP; switching to the
+published URL enabled authenticated model and sample requests without widening
+the backend's IAM policy.
 
-The public access change is applied only after the demo revision is deployed and
-reviewed. Existing Supabase accounts, ownership rules, and private files are
-preserved. Ordinary Supabase sign-in is independent of the Cloud Run entry gate.
+The gateway service account has Token Creator only on itself, and IAP access
+only to `depth-wizard`. Supabase's redirect allowlist includes both service
+URLs with `/**`. Gateway public access uses Cloud Run's disabled invoker IAM
+check; API access still requires a valid, non-anonymous Supabase session.
+
+The live audit found HTTPS upload rejection after Cloud Run TLS termination.
+Set `GATEWAY_PUBLIC_ORIGIN` to the public HTTPS gateway origin; the proxy checks
+incoming Origin against this explicit configuration. Sample thumbnails now
+fetch through the authenticated transport, and backend cookies cannot be
+reused by the shared proxy client. The final lightweight repair image build
+`e1d9ae97-1ab0-4e08-b090-5597ca20b7c4` completed successfully, and revision
+`depth-wizard-gateway-00006-469` serves 100% of gateway traffic. No model-backend
+image rebuild was needed.
+
+Verified live: gateway health responds successfully; its public browser config
+enables Google login and requires sign-in for analysis; an invalid user token
+is rejected. Google login returns to the signed-in app. A real sample analysis
+completed in 1.159 seconds, appeared in the signed-in user's Supabase history,
+and reopened with its original image and depth result. Ten additional gateway checks passed with a mocked backend,
+including guest rejection, separate user/IAP identity forwarding, stripping
+cookies and spoofed IAP headers, rejecting cross-origin requests, and blocking
+local authentication routes, HTTPS termination, and cookie isolation on
+successive requests. The frontend build and all 12 frontend tests passed;
+55 backend tests passed with one skipped. Local tests do not prove hosted
+inference or cross-account isolation.
+
+Remaining live work:
+
+- Hosted deletion and isolation between two separate accounts were not tested.
+- GitHub main still contains the offline demo commit. A backend deployment
+  from main would restore demo-only behavior. The recovered source is on the
+  `codex/finish-cloud-run-gateway` branch; keep the serving pre-demo backend
+  revision pinned until the branch is reconciled with main and its trigger.
+
+The gateway serves the frontend publicly. `/api/*` requires a verified, non-anonymous Supabase user
+and forwards that user's token in `Authorization`, with the gateway's
+short-lived IAP token in `Proxy-Authorization`. Supabase history and storage
+continue using the user's session and owner-scoped policies. No private
+Supabase key belongs in the browser or this gateway.
+
+## Existing private backend
 
 - Google Cloud project: `project-f78febd0-7836-4470-8e4`
 - Cloud Run service: `depth-wizard`, region `asia-south1`
@@ -27,8 +64,8 @@ preserved. Ordinary Supabase sign-in is independent of the Cloud Run entry gate.
 
 The existing `depth-wizard-main` Cloud Build trigger builds the Dockerfile on
 pushes to main, pushes the image, and deploys it while preserving the existing
-private IAM and Identity-Aware Proxy settings. IAP allows only
-`prakharendrashukla@gmail.com`. The builder has Cloud Run Developer on this
+private IAM and Identity-Aware Proxy settings. IAP allows
+`prakharendrashukla@gmail.com` and the gateway service identity. The builder has Cloud Run Developer on this
 service and Service Account User on its existing runtime identity. A deployment
 using that builder identity completed successfully.
 
@@ -44,7 +81,8 @@ secret remains attached to the service.
 `supabase/setup.sql` was applied as `depth_wizard_private_history` to the
 existing Supabase project. It provides owner-scoped profiles and analyses,
 RLS policies, and the private `depth-wizard` storage bucket. The Auth site URL
-and redirect allowlist point to the Cloud Run URL. Email confirmation is
+remains the existing backend Cloud Run URL; the redirect allowlist includes
+both the backend and gateway Cloud Run origins. Email confirmation is
 disabled at the user's request: signup uses only email and password and returns
 an immediate session. Email ownership is not verified. Google sign-in uses a
 separate OAuth client registered with Supabase; set `SUPABASE_GOOGLE_ENABLED=true`
@@ -57,10 +95,9 @@ directories are not persistent cloud storage.
 
 ## Remaining live verification
 
-Private browser access and real Depth Anything V2 Small processing are verified.
-Finish signup/login, Google sign-in, save/reopen/delete of history, and isolation
-between two accounts. Local checks and an empty
-Security Advisor are not proof that these hosted flows have completed.
+Private backend protection, Google login, analysis, and save/reopen of the
+owner's private history are verified. Hosted deletion and isolation between
+two separate accounts were not exercised in this deployment audit.
 
 Shadow areas use square metres only when the spacing of the depth raster is
 provided. Otherwise the UI reports pixel counts and illustrative coverage.

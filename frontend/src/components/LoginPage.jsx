@@ -1,10 +1,9 @@
 import { useState } from "react";
 import { useAuth } from "../AuthContext";
-import { publicDemoOnly } from "../runtimeConfig.js";
 import "./LoginPage.css";
 
 export default function LoginPage() {
-  const { authenticate, error: connectionError, cloud, enterGuest, resetPassword, recovering, updatePassword, googleEnabled, googleLogin } = useAuth();
+  const { authenticate, error: connectionError, cloud, enterGuest, guestEnabled, resetPassword, recovering, updatePassword, googleEnabled, googleLogin } = useAuth();
   const [mode, setMode] = useState("login");
   const [values, setValues] = useState({ email: "", password: "", name: "" });
   const [error, setError] = useState("");
@@ -29,7 +28,7 @@ export default function LoginPage() {
         <div className="login-brand">🧙‍♂️ Depth Wizard</div>
         <p className="login-intro">Single-view height estimation and 3D exploration</p>
         <h1 id="login-title">{recovering ? "Choose a new password" : mode === "reset" ? "Reset password" : register ? "Create your account" : "Welcome back"}</h1>
-        <p className="login-help">{publicDemoOnly ? "Sign in to access your own saved history. This website offers an offline demo." : "Save your analyses and return to them whenever you need."}</p>
+        <p className="login-help">{guestEnabled ? "Save your analyses and return to them whenever you need." : "Sign in to run analyses and save your work."}</p>
         <form onSubmit={submit}>
           {register && !cloud && <label>Name<input name="name" autoComplete="name" value={values.name} onChange={field} maxLength={100} required disabled={busy} /></label>}
           {!recovering && <label>Email<input name="email" type="email" autoComplete="email" value={values.email} onChange={field} maxLength={254} required disabled={busy} /></label>}
@@ -44,8 +43,10 @@ export default function LoginPage() {
         </button>}
         {cloud && !recovering && <>
           {googleEnabled && <button className="login-toggle" disabled={busy} onClick={() => googleLogin().catch(err => setError(err.message))}>Sign in with Google</button>}
-          <button className="login-submit" type="button" disabled={busy} onClick={enterGuest}>Try without login</button>
-          <p className="login-help">{publicDemoOnly ? "Explore the offline demo without an account. Cloud image analysis is disabled." : "Guest mode includes all analysis tools. Sign in to save history."}</p>
+          {guestEnabled && <>
+            <button className="login-submit" type="button" disabled={busy} onClick={enterGuest}>Try without login</button>
+            <p className="login-help">Guest mode includes all analysis tools. Sign in to save history.</p>
+          </>}
         </>}
       </section>
     </main>
