@@ -15,12 +15,12 @@ export const MODEL_CATALOG = [
     params: "24.8M",
     speed: "fast",
     speedIcon: "⚡",
-    speedText: "Fast (~35ms)",
+    speedText: "Fastest neural model",
     accuracyText: "Relative depth",
     architecture: "Vision Transformer (ViT-Small) + DPT Head",
     bestFor: "Fast previews and general scene depth estimation",
     description: "Compact monocular depth model intended for responsive previews. Output is relative and depends on the input image.",
-    hardwareReq: "CPU or GPU (>=2GB VRAM)",
+    hardwareReq: "CPU or GPU; weights download on first use",
     isDefault: true,
   },
   {
@@ -31,12 +31,12 @@ export const MODEL_CATALOG = [
     params: "97.5M",
     speed: "medium",
     speedIcon: "🔄",
-    speedText: "Medium (~90ms)",
+    speedText: "Balanced",
     accuracyText: "Relative depth",
     architecture: "Vision Transformer (ViT-Base) + Multi-scale Neck",
     bestFor: "General scenes where a larger model is acceptable",
     description: "Medium-sized monocular depth model. Output is relative and depends on the input image.",
-    hardwareReq: "GPU Recommended (>=4GB VRAM)",
+    hardwareReq: "CPU or GPU; weights download on first use",
     isDefault: false,
   },
   {
@@ -47,12 +47,12 @@ export const MODEL_CATALOG = [
     params: "335.3M",
     speed: "slow",
     speedIcon: "🐢",
-    speedText: "Slow (~240ms)",
+    speedText: "Slowest neural model",
     accuracyText: "Relative depth",
     architecture: "Vision Transformer (ViT-Large) + DPT",
     bestFor: "General scenes where the largest Depth Anything V2 variant is desired",
     description: "Large monocular depth model. Its output is relative and is not a survey-grade elevation product.",
-    hardwareReq: "NVIDIA GPU Required (>=8GB VRAM)",
+    hardwareReq: "CPU or GPU; needs a larger memory limit and model download",
     isDefault: false,
   },
   {
@@ -63,12 +63,12 @@ export const MODEL_CATALOG = [
     params: "21.4M",
     speed: "fast",
     speedIcon: "⚡",
-    speedText: "Fast (~28ms)",
+    speedText: "Fast",
     accuracyText: "Relative depth",
     architecture: "MobileNetV2 + DPT Residual Head",
     bestFor: "Edge devices, ultra-low resource environments, quick rough contours",
     description: "Classical monocular depth estimator trained on diverse multi-dataset mixtures for general scenes.",
-    hardwareReq: "Any CPU / Mobile / WebAssembly",
+    hardwareReq: "CPU or GPU; weights download on first use",
     isDefault: false,
   },
   {
@@ -79,12 +79,12 @@ export const MODEL_CATALOG = [
     params: "345M",
     speed: "slow",
     speedIcon: "🐢",
-    speedText: "Slow (~280ms)",
+    speedText: "Slow",
     accuracyText: "Relative depth",
     architecture: "BEiT-Large + Multi-scale Decoder",
     bestFor: "Complex scenes with mixed indoor/outdoor depth ranges and urban structures",
     description: "Robust multi-domain relative depth estimation using large-scale transformer backbone.",
-    hardwareReq: "GPU (>=6GB VRAM)",
+    hardwareReq: "CPU or GPU; needs a larger memory limit and model download",
     isDefault: false,
   },
   {
@@ -95,17 +95,17 @@ export const MODEL_CATALOG = [
     params: "348M",
     speed: "slow",
     speedIcon: "🐢",
-    speedText: "Slow (~310ms)",
+    speedText: "Slow",
     accuracyText: "Metric depth estimate",
     architecture: "Metric ZoeDepth ViT + Multi-bin Head",
     bestFor: "Scenes suited to its metric-depth training domains",
     description: "Predicts metric-scale depth for supported scene types. Results still depend on the scene and input image.",
-    hardwareReq: "GPU Required (>=8GB VRAM)",
+    hardwareReq: "CPU or GPU; needs a larger memory limit and model download",
     isDefault: false,
   },
   {
     id: "metric3d",
-    name: "Metric3D",
+    name: "Metric3D (not available)",
     family: "Metric3D",
     variant: "ViT-g Large",
     params: "450M",
@@ -114,9 +114,9 @@ export const MODEL_CATALOG = [
     speedText: "Slow (~380ms)",
     accuracyText: "Metric depth estimate",
     architecture: "Canonical Camera Space Transformation",
-    bestFor: "Metric depth experiments with suitable camera information",
-    description: "Metric-depth model that uses camera-space assumptions. Output is an estimate and is not a geodetic survey measurement.",
-    hardwareReq: "High-end GPU (>=12GB VRAM)",
+    bestFor: "Not implemented by this server",
+    description: "This model is not available in the current server build. Choose another enabled model.",
+    hardwareReq: "Unavailable",
     isDefault: false,
   },
   {
@@ -127,7 +127,7 @@ export const MODEL_CATALOG = [
     params: "0M (CPU)",
     speed: "fast",
     speedIcon: "⚡",
-    speedText: "Instant (~5ms)",
+    speedText: "Instant heuristic",
     accuracyText: "Synthetic depth",
     architecture: "Luminance Gradient + Multi-frequency FFT",
     bestFor: "Offline mode without GPU/model weights, hardware testing, instant feedback",
@@ -279,8 +279,8 @@ function ModelSelector({ currentModel = "depth-anything-v2-small", onModelChange
                 <div className="select-backdrop" onClick={() => setIsOpen(false)} />
                 <div className="dropdown-menu" role="listbox">
                   <div className="dropdown-header">
-                    <span>Available Neural Depth Architectures</span>
-                    <span className="dropdown-count">{MODEL_CATALOG.length} models</span>
+                    <span>Depth model options</span>
+                    <span className="dropdown-count">{MODEL_CATALOG.length} options</span>
                   </div>
 
                   <div className="dropdown-items-list">
@@ -290,7 +290,8 @@ function ModelSelector({ currentModel = "depth-anything-v2-small", onModelChange
                       const isRec = model.id === recommendedId;
 
                       return (
-                        <div
+                        <button
+                          type="button"
                           key={model.id}
                           role="option"
                           aria-selected={isSelected}
@@ -298,6 +299,7 @@ function ModelSelector({ currentModel = "depth-anything-v2-small", onModelChange
                             !isAvailable || disabled || switching ? "disabled" : ""
                           }`}
                           aria-disabled={!isAvailable || disabled || switching}
+                          disabled={!isAvailable || disabled || switching}
                           onClick={() => handleSelect(model)}
                           onMouseEnter={() => setHoveredModel(model)}
                           onMouseLeave={() => setHoveredModel(null)}
@@ -322,7 +324,7 @@ function ModelSelector({ currentModel = "depth-anything-v2-small", onModelChange
                           <div className="option-meta">
                             <span className="option-params">{model.params}</span>
                           </div>
-                        </div>
+                        </button>
                       );
                     })}
                   </div>
@@ -338,6 +340,7 @@ function ModelSelector({ currentModel = "depth-anything-v2-small", onModelChange
             type="button"
             className="compare-models-btn"
             onClick={handleCompareClick}
+            disabled={disabled || !onCompareRequest}
             title="Compare inference output across multiple depth models side-by-side"
           >
             <span className="compare-icon">⚡</span>

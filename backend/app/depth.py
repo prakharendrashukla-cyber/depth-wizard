@@ -2,10 +2,10 @@
 Depth estimation module — Multi-Model Support.
 
 Supports model selection among:
-1. Depth Anything V2 Small / Base / Large (HuggingFace Transformers)
+1. Depth Anything V2 Small / Base / Large (upstream PyTorch implementation)
 2. MiDaS Small / Large (torch.hub)
-3. ZoeDepth (metric depth, HuggingFace)
-4. Metric3D (HuggingFace)
+3. ZoeDepth (metric depth, PyTorch Hub)
+4. Metric3D (not implemented)
 5. Procedural fallback (brightness + gradient heuristic — no ML needed)
 
 Includes auto-model recommendation based on input type.
@@ -50,76 +50,85 @@ _INFERNO_POINTS = np.array([
 MODEL_REGISTRY = {
     "depth-anything-v2-small": {
         "name": "Depth Anything V2 Small",
-        "hf_id": "depth-anything/Depth-Anything-V2-Small-hf",
+        "encoder": "vits",
+        "weights_file": "depth_anything_v2_vits.pth",
+        "weights_url": "https://huggingface.co/depth-anything/Depth-Anything-V2-Small/resolve/main/depth_anything_v2_vits.pth",
         "type": "depth-anything",
         "speed": "fast",
         "accuracy": 3,
         "params": "24.8M",
+        "minimum_memory_gib": 2,
         "best_for": "General-purpose, fast inference. Good for real-time applications.",
     },
     "depth-anything-v2-base": {
         "name": "Depth Anything V2 Base",
-        "hf_id": "depth-anything/Depth-Anything-V2-Base-hf",
+        "encoder": "vitb",
+        "weights_file": "depth_anything_v2_vitb.pth",
+        "weights_url": "https://huggingface.co/depth-anything/Depth-Anything-V2-Base/resolve/main/depth_anything_v2_vitb.pth",
         "type": "depth-anything",
         "speed": "medium",
         "accuracy": 4,
         "params": "97.5M",
+        "minimum_memory_gib": 2,
         "best_for": "Balanced speed/accuracy. Good for most use cases.",
     },
     "depth-anything-v2-large": {
         "name": "Depth Anything V2 Large",
-        "hf_id": "depth-anything/Depth-Anything-V2-Large-hf",
+        "encoder": "vitl",
+        "weights_file": "depth_anything_v2_vitl.pth",
+        "weights_url": "https://huggingface.co/depth-anything/Depth-Anything-V2-Large/resolve/main/depth_anything_v2_vitl.pth",
         "type": "depth-anything",
         "speed": "slow",
         "accuracy": 5,
         "params": "335M",
+        "minimum_memory_gib": 4,
         "best_for": "Highest accuracy. Best for detailed analysis and publications.",
     },
     "midas-small": {
         "name": "MiDaS v3.1 Small",
-        "hf_id": None,
         "type": "midas",
         "variant": "MiDaS_small",
         "speed": "fast",
         "accuracy": 2,
         "params": "21M",
+        "minimum_memory_gib": 2,
         "best_for": "Lightweight fallback. Works on CPU without large downloads.",
     },
     "midas-large": {
         "name": "MiDaS v3.1 DPT Large",
-        "hf_id": None,
         "type": "midas",
         "variant": "DPT_Large",
         "speed": "slow",
         "accuracy": 4,
         "params": "344M",
+        "minimum_memory_gib": 4,
         "best_for": "High-quality depth. Good indoor/outdoor generalization.",
     },
     "zoedepth": {
         "name": "ZoeDepth (Metric)",
-        "hf_id": "Intel/zoedepth-nyu-kitti",
         "type": "zoedepth",
         "speed": "medium",
         "accuracy": 4,
         "params": "105M",
+        "minimum_memory_gib": 6,
         "best_for": "Metric (absolute) depth. Trained on NYU+KITTI for real-world scale.",
     },
     "metric3d": {
         "name": "Metric3D v2 Small",
-        "hf_id": "JUGGHM/Metric3D-v2-Small",
         "type": "unsupported",
         "speed": "medium",
         "accuracy": 4,
         "params": "85M",
-        "best_for": "Not implemented by the installed Transformers model stack.",
+        "minimum_memory_gib": 8,
+        "best_for": "Not implemented by the current backend model stack.",
     },
     "procedural-fallback": {
         "name": "Procedural Fallback",
-        "hf_id": None,
         "type": "procedural",
         "speed": "instant",
         "accuracy": 1,
         "params": "0",
+        "minimum_memory_gib": 0,
         "best_for": "No-dependency demo mode. Uses brightness + gradient heuristics.",
     },
 }
@@ -145,8 +154,11 @@ def colorize_depth(depth: np.ndarray) -> Image.Image:
 def _model_dependencies_installed(model_type: str) -> bool:
     try:
         import torch  # noqa: F401
-        if model_type in ("depth-anything", "zoedepth", "metric3d"):
-            import transformers  # noqa: F401
+        if model_type == "depth-anything":
+            from depth_anything_v2.dpt import DepthAnythingV2  # noqa: F401
+            import cv2  # noqa: F401
+        elif model_type in ("midas", "zoedepth"):
+            import timm  # noqa: F401
     except ImportError:
         return False
     return True
@@ -157,62 +169,73 @@ def _model_weights_cached(model_id: str, info: Dict) -> bool:
     model_type = info["type"]
     if model_type == "procedural":
         return True
-    if model_type in ("depth-anything", "zoedepth", "metric3d"):
-        try:
-            from huggingface_hub import snapshot_download
-            snapshot = Path(snapshot_download(info["hf_id"], local_files_only=True))
-        except Exception:
-            return False
-        if not (snapshot / "config.json").is_file():
-            return False
-        if not any((snapshot / name).is_file() for name in (
-            "preprocessor_config.json", "processor_config.json"
-        )):
-            return False
-
-        if any((snapshot / name).is_file() for name in ("model.safetensors", "pytorch_model.bin")):
-            return True
-        for index_name in ("model.safetensors.index.json", "pytorch_model.bin.index.json"):
-            index_path = snapshot / index_name
-            if index_path.is_file():
-                try:
-                    import json
-                    shards = set(json.loads(index_path.read_text(encoding="utf-8"))["weight_map"].values())
-                    if shards and all((snapshot / shard).is_file() for shard in shards):
-                        return True
-                except (OSError, ValueError, KeyError, TypeError):
-                    continue
+    try:
+        import torch
+        hub_dir = Path(torch.hub.get_dir())
+    except ImportError:
         return False
+    checkpoints = hub_dir / "checkpoints"
+    if model_type == "depth-anything":
+        return (checkpoints / info["weights_file"]).is_file()
     if model_type == "midas":
-        try:
-            import torch
-            hub_dir = Path(torch.hub.get_dir())
-        except ImportError:
-            return False
         repo_dirs = (hub_dir / "intel-isl_MiDaS_master", hub_dir / "intel-isl_MiDaS_main")
         checkpoint = "midas_v21_small_256.pt" if model_id == "midas-small" else "dpt_large_384.pt"
         return any((repo / "hubconf.py").is_file() for repo in repo_dirs) and (
-            hub_dir / "checkpoints" / checkpoint
+            checkpoints / checkpoint
         ).is_file()
+    if model_type == "zoedepth" and checkpoints.is_dir():
+        return any(path.name.startswith("ZoeD_") and path.suffix == ".pt" for path in checkpoints.iterdir())
     return False
 
 
+def _runtime_memory_gib() -> float:
+    """Read the container memory limit so the UI doesn't offer models that will OOM."""
+    configured = os.getenv("DEPTH_MODEL_MEMORY_GIB")
+    if configured:
+        try:
+            return max(0.0, float(configured))
+        except ValueError:
+            logger.warning("Ignoring invalid DEPTH_MODEL_MEMORY_GIB=%r", configured)
+
+    for path in ("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes"):
+        try:
+            raw = Path(path).read_text(encoding="ascii").strip()
+            if raw == "max":
+                return float("inf")
+            limit_bytes = int(raw)
+            # Some older cgroup setups report a sentinel far above physical RAM.
+            if limit_bytes > 1 << 60:
+                continue
+            return limit_bytes / (1024 ** 3)
+        except (OSError, ValueError):
+            continue
+
+    # Local developer machines without cgroup limits should not hide models.
+    return float("inf")
+
+
 def list_available_models(current_model: Optional[str] = None) -> List[Dict]:
-    """List implemented models and report local weight availability separately."""
+    """List loadable models, considering dependencies and this container's memory cap."""
     results = []
+    memory_limit = _runtime_memory_gib()
     for model_id, info in MODEL_REGISTRY.items():
         supported = info["type"] in {"depth-anything", "midas", "zoedepth", "procedural"}
-        ready = info["type"] == "procedural" or (
+        dependencies_ready = info["type"] == "procedural" or (
             supported and _model_dependencies_installed(info["type"])
         )
+        memory_ready = memory_limit >= info.get("minimum_memory_gib", 0)
+        ready = dependencies_ready and memory_ready
         cached = _model_weights_cached(model_id, info) if supported else False
-        if model_id == current_model and supported:
+        if model_id == current_model and supported and dependencies_ready:
             ready = cached = True
         unavailable_reason = None
         if not supported:
-            unavailable_reason = "Metric3D is not implemented by the installed Transformers model stack."
-        elif not ready:
+            unavailable_reason = "Metric3D is not implemented by the current backend model stack."
+        elif not dependencies_ready:
             unavailable_reason = "Required backend ML dependencies are not installed."
+        elif not memory_ready and model_id != current_model:
+            required = info.get("minimum_memory_gib", 0)
+            unavailable_reason = f"This model needs at least {required} GiB of container memory on the current server."
         entry = {
             **info,
             "id": model_id,
@@ -270,7 +293,6 @@ class DepthEstimator:
         self.model_id = "none"
         self._transform = None  # MiDaS only
         self._device = None
-        self.processor = None  # HF processor
 
         if model_id:
             self.load_model(model_id)
@@ -301,9 +323,17 @@ class DepthEstimator:
     def load_model(self, model_id: str):
         with self._lock:
             candidate = object.__new__(DepthEstimator)
-            candidate.model = candidate.processor = candidate._transform = candidate._device = None
+            candidate.model = candidate._transform = candidate._device = None
             candidate._load_model(model_id)
             self.__dict__.update(candidate.__dict__)
+
+    def release(self):
+        """Release the active model before loading another large model."""
+        with self._lock:
+            self._clear_model()
+            self._device = None
+            self.model_name = "none"
+            self.model_id = "none"
 
     def _load_model(self, model_id: str):
         """Load a specific model by its registry ID."""
@@ -317,11 +347,11 @@ class DepthEstimator:
         self._clear_model()
 
         if model_type == "depth-anything":
-            self._load_depth_anything(info["hf_id"], model_id)
+            self._load_depth_anything(info, model_id)
         elif model_type == "midas":
             self._load_midas(info.get("variant", "MiDaS_small"), model_id)
         elif model_type == "zoedepth":
-            self._load_zoedepth(info["hf_id"], model_id)
+            self._load_zoedepth(model_id)
         elif model_type == "procedural":
             self.model_name = "procedural-fallback"
             self.model_id = model_id
@@ -336,9 +366,6 @@ class DepthEstimator:
         if self.model is not None:
             del self.model
             self.model = None
-        if self.processor is not None:
-            del self.processor
-            self.processor = None
         self._transform = None
         try:
             import torch
@@ -347,20 +374,26 @@ class DepthEstimator:
         except ImportError:
             pass
 
-    def _load_depth_anything(self, hf_id: str, model_id: str):
+    def _load_depth_anything(self, info: Dict, model_id: str):
         import torch
-        from transformers import AutoImageProcessor, AutoModelForDepthEstimation
+        from depth_anything_v2.dpt import DepthAnythingV2
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
-
-        try:
-            self.processor = AutoImageProcessor.from_pretrained(hf_id, local_files_only=True)
-            self.model = AutoModelForDepthEstimation.from_pretrained(hf_id, local_files_only=True).to(device)
-        except Exception:
-            # Fetch only the model that the caller explicitly selected.
-            self.processor = AutoImageProcessor.from_pretrained(hf_id)
-            self.model = AutoModelForDepthEstimation.from_pretrained(hf_id).to(device)
-
+        configs = {
+            "vits": {"features": 64, "out_channels": [48, 96, 192, 384]},
+            "vitb": {"features": 128, "out_channels": [96, 192, 384, 768]},
+            "vitl": {"features": 256, "out_channels": [256, 512, 1024, 1024]},
+        }
+        encoder = info["encoder"]
+        model = DepthAnythingV2(encoder=encoder, **configs[encoder])
+        state_dict = torch.hub.load_state_dict_from_url(
+            info["weights_url"],
+            model_dir=str(Path(torch.hub.get_dir()) / "checkpoints"),
+            map_location="cpu",
+            progress=True,
+        )
+        model.load_state_dict(state_dict)
+        self.model = model.to(device)
         self.model.eval()
         self.model_name = MODEL_REGISTRY[model_id]["name"]
         self.model_id = model_id
@@ -386,28 +419,25 @@ class DepthEstimator:
         self._device = device
         logger.info("Loaded %s on %s", self.model_name, device)
 
-    def _load_zoedepth(self, hf_id: str, model_id: str):
-        """Load ZoeDepth metric depth model from HuggingFace."""
+    def _load_zoedepth(self, model_id: str):
+        """Load ZoeDepth through its upstream PyTorch Hub implementation."""
+        import torch
+
+        device = "cuda" if torch.cuda.is_available() else "cpu"
         try:
-            import torch
-            from transformers import AutoImageProcessor, AutoModelForDepthEstimation
-
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-
-            try:
-                self.processor = AutoImageProcessor.from_pretrained(hf_id, local_files_only=True)
-                self.model = AutoModelForDepthEstimation.from_pretrained(hf_id, local_files_only=True).to(device)
-            except Exception:
-                self.processor = AutoImageProcessor.from_pretrained(hf_id)
-                self.model = AutoModelForDepthEstimation.from_pretrained(hf_id).to(device)
-
-            self.model.eval()
-            self.model_name = MODEL_REGISTRY[model_id]["name"]
-            self.model_id = model_id
-            self._device = device
-            logger.info("Loaded %s on %s", self.model_name, device)
+            self.model = torch.hub.load(
+                "isl-org/ZoeDepth",
+                "ZoeD_NK",
+                pretrained=True,
+                trust_repo=True,
+            ).to(device)
         except Exception as exc:
             raise RuntimeError(f"Failed to load ZoeDepth: {exc}") from exc
+        self.model.eval()
+        self.model_name = MODEL_REGISTRY[model_id]["name"]
+        self.model_id = model_id
+        self._device = device
+        logger.info("Loaded %s on %s", self.model_name, device)
 
     # ── Inference ────────────────────────────────────────────────────
 
@@ -431,27 +461,15 @@ class DepthEstimator:
         elif model_type == "midas":
             return self._run_midas(image)
         elif model_type == "zoedepth":
-            return self._run_hf_depth(image)
+            return self._run_zoedepth(image)
         elif model_type == "procedural":
             return self._run_procedural(image)
         raise RuntimeError(f"Model type is not implemented: {model_type}")
 
     def _run_depth_anything(self, image: Image.Image) -> np.ndarray:
-        import torch
-        w, h = image.size
-        inputs = self.processor(images=image, return_tensors="pt").to(self._device)
-        with torch.inference_mode():
-            outputs = self.model(**inputs)
-            predicted_depth = outputs.predicted_depth
-
-            prediction = torch.nn.functional.interpolate(
-                predicted_depth.unsqueeze(1),
-                size=(h, w),
-                mode="bilinear",
-                align_corners=False,
-            ).squeeze()
-
-        return prediction.detach().cpu().numpy().astype(np.float32)
+        import cv2
+        raw_image = cv2.cvtColor(np.asarray(image.convert("RGB")), cv2.COLOR_RGB2BGR)
+        return np.asarray(self.model.infer_image(raw_image), dtype=np.float32)
 
     def _run_midas(self, image: Image.Image) -> np.ndarray:
         import torch
@@ -470,36 +488,12 @@ class DepthEstimator:
 
         return prediction.detach().cpu().numpy().astype(np.float32)
 
-    def _run_hf_depth(self, image: Image.Image) -> np.ndarray:
-        """Generic HuggingFace depth model runner (ZoeDepth, Metric3D)."""
+    def _run_zoedepth(self, image: Image.Image) -> np.ndarray:
+        """Run ZoeDepth's upstream PIL inference helper and return raw depth."""
         import torch
-        w, h = image.size
-        inputs = self.processor(images=image, return_tensors="pt").to(self._device)
         with torch.inference_mode():
-            outputs = self.model(**inputs)
-            predicted_depth = outputs.predicted_depth
-
-            if predicted_depth.dim() == 2:
-                prediction = predicted_depth
-            elif predicted_depth.dim() == 3:
-                prediction = predicted_depth.squeeze(0)
-            else:
-                prediction = torch.nn.functional.interpolate(
-                    predicted_depth.unsqueeze(1) if predicted_depth.dim() == 3 else predicted_depth,
-                    size=(h, w),
-                    mode="bilinear",
-                    align_corners=False,
-                ).squeeze()
-
-            if prediction.shape[0] != h or prediction.shape[1] != w:
-                prediction = torch.nn.functional.interpolate(
-                    prediction.unsqueeze(0).unsqueeze(0),
-                    size=(h, w),
-                    mode="bilinear",
-                    align_corners=False,
-                ).squeeze()
-
-        return prediction.detach().cpu().numpy().astype(np.float32)
+            depth = self.model.infer_pil(image.convert("RGB"))
+        return np.asarray(depth, dtype=np.float32)
 
     @staticmethod
     def _run_procedural(image: Image.Image) -> np.ndarray:

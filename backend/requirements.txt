@@ -10,8 +10,8 @@ Pillow==12.3.0
 # Neural depth models. Weights download separately on first use.
 torch==2.6.0
 torchvision==0.21.0
-transformers==4.51.3
-timm==1.0.15
+# timm is installed separately without optional Hub dependencies in setup.bat/Dockerfile.
+PyYAML==6.0.2
 
 tifffile==2024.9.20
 opencv-python==4.10.0.84

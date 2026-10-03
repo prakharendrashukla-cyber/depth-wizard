@@ -22,6 +22,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY backend/requirements.txt ./backend/
 RUN pip install --no-cache-dir -r backend/requirements.txt
+# ZoeDepth/MiDaS use timm 0.6.12; omit optional Hub clients and safetensors.
+RUN pip install --no-cache-dir --no-deps timm==0.6.12
 
 COPY backend/ ./backend/
 COPY run_single_server.py ./

@@ -36,9 +36,16 @@ def test_procedural_inference(scene):
 def test_available_models_separates_implementation_from_cached_weights(monkeypatch):
     monkeypatch.setattr("app.depth._model_dependencies_installed", lambda model_type: True)
     monkeypatch.setattr("app.depth._model_weights_cached", lambda model_id, info: False)
+    monkeypatch.setattr("app.depth._runtime_memory_gib", lambda: 2)
     models = {entry["id"]: entry for entry in list_available_models()}
     assert models["depth-anything-v2-small"]["available"] is True
     assert models["depth-anything-v2-small"]["weights_cached"] is False
+    assert models["depth-anything-v2-base"]["available"] is True
+    assert models["depth-anything-v2-large"]["available"] is False
+    assert "4 GiB" in models["depth-anything-v2-large"]["unavailable_reason"]
+    assert models["midas-small"]["available"] is True
+    assert models["midas-large"]["available"] is False
+    assert models["zoedepth"]["available"] is False
     assert models["metric3d"]["available"] is False
     assert models["metric3d"]["unavailable_reason"]
     availability = {model_id: entry["available"] for model_id, entry in models.items()}
@@ -46,10 +53,20 @@ def test_available_models_separates_implementation_from_cached_weights(monkeypat
     assert availability["metric3d"] is False
 
 
+def test_larger_models_are_available_with_eight_gib(monkeypatch):
+    monkeypatch.setattr("app.depth._model_dependencies_installed", lambda model_type: True)
+    monkeypatch.setattr("app.depth._model_weights_cached", lambda model_id, info: False)
+    monkeypatch.setattr("app.depth._runtime_memory_gib", lambda: 8)
+    models = {entry["id"]: entry for entry in list_available_models()}
+    for model_id in ("depth-anything-v2-large", "midas-large", "zoedepth"):
+        assert models[model_id]["available"] is True
+    assert models["metric3d"]["available"] is False
+
+
 def test_failed_explicit_model_switch_keeps_actual_model(monkeypatch):
     estimator = DepthEstimator("procedural-fallback")
 
-    def fail_load(self, hf_id, model_id):
+    def fail_load(self, info, model_id):
         raise OSError("weights unavailable")
 
     monkeypatch.setattr(DepthEstimator, "_load_depth_anything", fail_load)
@@ -73,20 +90,24 @@ def test_unimplemented_metric3d_is_not_advertised_or_substituted():
     assert estimator.model_id == "procedural-fallback"
 
 
-def test_api_model_switch_reports_load_failure_without_replacing_estimator(monkeypatch):
+def test_api_model_switch_releases_old_model_and_restores_it_on_failure(monkeypatch):
     current = DepthEstimator("procedural-fallback")
     monkeypatch.setattr(main, "estimator", current)
+    original_init = DepthEstimator.__init__
 
     def fail_init(self, model_id=None):
-        raise OSError("weights are not cached")
+        if model_id == "depth-anything-v2-small":
+            raise OSError("weights are not cached")
+        original_init(self, model_id)
 
     monkeypatch.setattr(DepthEstimator, "__init__", fail_init)
     with pytest.raises(Exception) as exc_info:
         main.get_estimator("depth-anything-v2-small")
     assert getattr(exc_info.value, "status_code", None) == 503
-    assert "no alternate model was selected" in str(exc_info.value.detail)
-    assert main.estimator is current
-    assert current.model_id == "procedural-fallback"
+    assert "previous model was restored" in str(exc_info.value.detail)
+    assert main.estimator is not current
+    assert main.estimator.model_id == "procedural-fallback"
+    assert current.model_id == "none"
 
 
 def test_estimate_payload_and_timings(owner, scene):
@@ -113,7 +134,7 @@ def test_estimate_payload_and_timings(owner, scene):
 @pytest.mark.skipif(os.getenv("RUN_NEURAL_TESTS") != "1", reason="Set RUN_NEURAL_TESTS=1 to download/load real model weights")
 def test_neural_model_inference(scene):
     pytest.importorskip("torch")
-    pytest.importorskip("transformers")
+    pytest.importorskip("cv2")
     estimator = DepthEstimator("depth-anything-v2-small")
     assert estimator.model_id == "depth-anything-v2-small"
     depth = estimator.estimate(scene)

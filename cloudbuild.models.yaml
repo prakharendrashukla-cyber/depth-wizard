@@ -1,0 +1,30 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - Dockerfile
+      - -t
+      - asia-south1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/depth-wizard:$BUILD_ID
+      - .
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - asia-south1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/depth-wizard:$BUILD_ID
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - Dockerfile.gateway
+      - -t
+      - asia-south1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/depth-wizard-gateway:$BUILD_ID
+      - .
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - asia-south1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/depth-wizard-gateway:$BUILD_ID
+images:
+  - asia-south1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/depth-wizard:$BUILD_ID
+  - asia-south1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/depth-wizard-gateway:$BUILD_ID
+options:
+  logging: CLOUD_LOGGING_ONLY

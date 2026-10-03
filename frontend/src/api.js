@@ -26,7 +26,9 @@ export async function apiFetch(path, options = {}) {
     const detail = data?.detail;
     const message = typeof detail === "string" ? detail
       : Array.isArray(detail) ? detail.map(item => item.msg).join("; ")
-      : "Request failed. Please try again.";
+      : response.status === 503 && relative === "/estimate"
+        ? "The selected model could not finish on this server. Your previous result is preserved; choose a lighter model or retry."
+        : `Request failed (HTTP ${response.status}). Please try again.`;
     throw new ApiError(message, response.status);
   }
   if (isJson) response.json = async () => data;

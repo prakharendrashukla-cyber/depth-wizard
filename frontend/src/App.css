@@ -59,8 +59,20 @@
 .header-actions {
   display: flex;
   align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 6px;
+  width: 100%;
+}
+
+.header-user {
+  flex: 0 1 auto;
+  max-width: min(100%, 320px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
 }
 
 .header-btn {
@@ -457,6 +469,12 @@
   .header-actions {
     flex-wrap: wrap;
     justify-content: center;
+  }
+  .app-header {
+    padding: 0.8rem;
+  }
+  .app-main {
+    padding: 0.75rem;
   }
   .modal-wide {
     width: 98%;

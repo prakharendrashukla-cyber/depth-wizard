@@ -27,6 +27,8 @@ if errorlevel 1 (
 echo [1/3] Installing pinned Python dependencies into .venv...
 ".venv\Scripts\python.exe" -m pip install -r backend\requirements.txt
 if errorlevel 1 goto fail
+".venv\Scripts\python.exe" -m pip install --no-deps timm==0.6.12
+if errorlevel 1 goto fail
 echo [2/3] Installing locked frontend dependencies...
 cd frontend
 call npm ci

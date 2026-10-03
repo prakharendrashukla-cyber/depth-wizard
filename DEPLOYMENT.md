@@ -64,10 +64,26 @@ Supabase key belongs in the browser or this gateway.
 
 The existing `depth-wizard-main` Cloud Build trigger builds the Dockerfile on
 pushes to main, pushes the image, and deploys it while preserving the existing
-private IAM and Identity-Aware Proxy settings. IAP allows
-`prakharendrashukla@gmail.com` and the gateway service identity. The builder has Cloud Run Developer on this
-service and Service Account User on its existing runtime identity. A deployment
-using that builder identity completed successfully.
+private IAM and Identity-Aware Proxy settings. IAP allows only the gateway
+service identity. The builder has Cloud Run Developer on this service and
+Service Account User on its existing runtime identity. A deployment using that
+builder identity completed successfully.
+
+## Model runtime capacity
+
+Depth Anything V2 Small/Base and MiDaS Small fit the 2 GiB runtime. Depth
+Anything V2 Large, MiDaS Large, and ZoeDepth need a larger memory limit. Model
+weights download on first use and are cached for the lifetime of a container
+instance. Switching models releases the previous model before loading the next
+to limit peak memory. Metric3D is shown as unavailable until its runtime is
+implemented; the procedural fallback is a synthetic heuristic, not an ML
+depth model.
+
+The backend does not install Transformers or `huggingface_hub`. ZoeDepth and
+MiDaS use `timm==0.6.12` without timm's optional Hub dependencies. Depth
+Anything V2 uses its vendored upstream PyTorch implementation. Its three
+official checkpoint files are downloaded directly from the upstream model
+URLs on first use; the backend still needs outbound access to those URLs.
 
 ## Runtime connection
 

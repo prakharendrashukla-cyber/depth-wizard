@@ -13,6 +13,7 @@ const VolumePanel = lazy(() => import("./components/VolumePanel"));
 const ValidationDashboard = lazy(() => import("./components/ValidationDashboard"));
 const UncertaintyView = lazy(() => import("./components/UncertaintyView"));
 import ModelSelector from "./components/ModelSelector";
+import ModelComparisonModal from "./components/ModelComparisonModal";
 const VideoProcessor = lazy(() => import("./components/VideoProcessor"));
 const BatchProcessor = lazy(() => import("./components/BatchProcessor"));
 const PDFExport = lazy(() => import("./components/PDFExport"));
@@ -137,6 +138,7 @@ function App() {
   const tabAnchorTopRef = useRef(null);
   const [showCalibration, setShowCalibration] = useState(false);
   const [showPdfExport, setShowPdfExport] = useState(false);
+  const [showModelCompare, setShowModelCompare] = useState(false);
   const [showDemoTour, setShowDemoTour] = useState(false);
   const [showVideoProcessor, setShowVideoProcessor] = useState(false);
   const [showBatchProcessor, setShowBatchProcessor] = useState(false);
@@ -204,14 +206,24 @@ function App() {
 
       const data = await res.json();
       setResult(data);
-      if (data.model_id || modelOverride) setCurrentModel(data.model_id || modelOverride);
+      if (data.model_id || modelOverride) {
+        const activeModelId = data.model_id || modelOverride;
+        setCurrentModel(activeModelId);
+        setBackendHealth((previous) => previous ? {
+          ...previous,
+          model: data.model || activeModelId,
+          model_id: activeModelId,
+        } : previous);
+      }
       setSavedId(null); setSaveMessage(""); setSourceFile(file); setScalePreset("relative");
       setOfflineDemo(false); setMeasurement(null); setShowCalibration(false); setActiveTab("3d");
       setScaleFactor(1.0);
       if (cloudMode && user) await saveCurrent(data, file);
       return true;
     } catch (err) {
-      setError(err.message || "Failed to process image.");
+      setError(err instanceof TypeError
+        ? "The connection to the depth service was interrupted. Your previous result has been kept; retry or choose a lighter model."
+        : err.message || "Failed to process image.");
       return false;
     } finally {
       setLoading(false);
@@ -232,6 +244,8 @@ function App() {
     }
     return handleUpload(sourceFile, modelId, { preserveResult: true });
   };
+
+  const handleCompareRequest = () => setShowModelCompare(true);
 
   // ── GCP Calibration complete ───────────────────────────────────────────
   const handleCalibrationComplete = useCallback((newScale) => {
@@ -336,7 +350,7 @@ function App() {
             Single-View Monocular Height Estimation · 3D Reconstruction · Geospatial Intelligence
           </p>
           <div className="header-actions">
-            <span style={{ overflowWrap: "anywhere" }}>{user?.email || user?.phone || "Guest · results are not saved"}</span>
+            <span className="header-user">{user?.email || user?.phone || "Guest · results are not saved"}</span>
             {user && <button className="header-btn" onClick={() => setShowHistory(true)}>My Analyses</button>}
             <button className="header-btn" onClick={() => guest ? leaveGuest() : logout().catch(err => setLogoutError(err.message))}>{guest ? "Sign in" : "Logout"}</button>
             {logoutError && <span role="alert">{logoutError}</span>}
@@ -376,7 +390,12 @@ function App() {
         {!result ? (
           <>
             <div className="pre-upload-model-selector">
-              <ModelSelector currentModel={currentModel} onModelChange={handleModelChange} disabled={loading} />
+              <ModelSelector
+                currentModel={currentModel}
+                onModelChange={handleModelChange}
+                onCompareRequest={handleCompareRequest}
+                disabled={loading}
+              />
             </div>
             <ImageUpload onUpload={handleUpload} loading={loading} error={error} />
           </>
@@ -405,6 +424,7 @@ function App() {
                 <ModelSelector
                   currentModel={currentModel}
                   onModelChange={handleModelChange}
+                  onCompareRequest={handleCompareRequest}
                   disabled={loading || (!!result && !sourceFile)}
                 />
               </div>
@@ -566,6 +586,15 @@ function App() {
           onClose={() => setShowPdfExport(false)}
         />
       </Suspense>}
+
+      {showModelCompare && (
+        <ModelComparisonModal
+          currentModel={currentModel}
+          result={result}
+          sourceFile={sourceFile}
+          onClose={() => setShowModelCompare(false)}
+        />
+      )}
 
       {showDemoTour && (
         <DemoTour

@@ -24,6 +24,7 @@ Endpoints:
 """
 
 import base64
+import gc
 import io
 import json
 import logging
@@ -75,25 +76,47 @@ batch_processor = None
 
 
 def get_estimator(model_id=None) -> DepthEstimator:
-    """Publish only fully loaded models; in-flight callers keep their old snapshot."""
+    """Switch models without keeping two large neural networks resident at once."""
     global estimator
     from app.depth import MODEL_REGISTRY
     if model_id and model_id not in MODEL_REGISTRY:
         raise HTTPException(400, "Unknown depth model")
     with estimator_lock:
-        if estimator is None or (model_id and estimator.model_id != model_id):
+        requested_model = model_id or os.getenv("DEPTH_MODEL") or None
+        if estimator is None or (requested_model and estimator.model_id != requested_model):
+            previous_model_id = estimator.model_id if estimator else None
+            previous_estimator = estimator
+            estimator = None
+            if previous_estimator is not None:
+                previous_estimator.release()
+                del previous_estimator
+                gc.collect()
             try:
-                candidate = DepthEstimator(model_id or os.getenv("DEPTH_MODEL") or None)
+                candidate = DepthEstimator(requested_model)
             except Exception as exc:
                 logger.warning("Requested depth model %s failed to load", model_id, exc_info=exc)
+                if previous_model_id in MODEL_REGISTRY:
+                    try:
+                        estimator = DepthEstimator(previous_model_id)
+                    except Exception:
+                        logger.exception("Could not restore previous model %s", previous_model_id)
                 if model_id:
                     raise HTTPException(
                         503,
-                        f"Model '{model_id}' could not be loaded; no alternate model was selected.",
+                        f"Model '{model_id}' could not be loaded; the previous model was restored when possible.",
                     ) from exc
                 raise
             estimator = candidate
         return estimator
+
+
+def _estimate_with_model(image: Image.Image, model_id: Optional[str]):
+    """Serialize model swaps and inference, then release the estimator reference."""
+    with estimator_lock:
+        active = get_estimator(model_id)
+        model_name, active_model_id = active.model_name, active.model_id
+        depth = active.estimate(image)
+        return model_name, active_model_id, depth
 
 def track_task(coro):
     task = asyncio.create_task(coro)
@@ -345,7 +368,6 @@ async def estimate_depth(
       - metadata          dimensions, timing, model, etc.
     """
     raw = await read_upload(image)
-    est = await asyncio.to_thread(get_estimator, model)
     img = _decode_image(raw)
 
     # Check for GeoTIFF metadata
@@ -369,12 +391,15 @@ async def estimate_depth(
     # ── Depth estimation (Async Non-blocking) ────────────────────────
     t0 = time.time()
     try:
-        depth = await asyncio.to_thread(est.estimate, img)
+        model_name, active_model_id, depth = await asyncio.to_thread(_estimate_with_model, img, model)
+    except HTTPException:
+        raise
     except Exception as exc:
-        logger.exception("Depth inference failed using %s", est.model_id)
+        failed_model = model or (estimator.model_id if estimator else "unknown")
+        logger.exception("Depth inference failed using %s", failed_model)
         raise HTTPException(
             503,
-            f"Model '{est.model_id}' failed during inference; no alternate model was used.",
+            f"Model '{failed_model}' failed during inference; no alternate model was used.",
         ) from exc
     depth_time = time.time() - t0
     logger.info("Depth estimation: %.2fs", depth_time)
@@ -397,8 +422,8 @@ async def estimate_depth(
     # ── Build response ───────────────────────────────────────────────
     response = {
         "status": "success",
-        "model": est.model_name,
-        "model_id": est.model_id,
+        "model": model_name,
+        "model_id": active_model_id,
         "metadata": {
             "original_width": original_w,
             "original_height": original_h,

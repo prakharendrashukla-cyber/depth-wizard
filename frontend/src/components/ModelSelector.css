@@ -203,6 +203,7 @@
 }
 
 .dropdown-option {
+  width: 100%;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -211,7 +212,17 @@
   cursor: pointer;
   background: transparent;
   border: 1px solid transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   transition: all 0.15s ease;
+}
+
+.dropdown-option:focus-visible,
+.select-trigger:focus-visible,
+.compare-models-btn:focus-visible {
+  outline: 2px solid #58a6ff;
+  outline-offset: 2px;
 }
 
 .dropdown-option:hover:not(.disabled) {

@@ -1,0 +1,122 @@
+.model-compare-panel {
+  width: min(96vw, 1000px);
+  color: #c9d1d9;
+}
+
+.model-compare-header,
+.model-compare-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+}
+
+.model-compare-header {
+  border-bottom: 1px solid #30363d;
+}
+
+.model-compare-header h2 {
+  margin: 0 0 6px;
+  color: #e6edf3;
+  font-size: 1.2rem;
+}
+
+.model-compare-header p,
+.model-compare-note {
+  margin: 0;
+  color: #8b949e;
+  font-size: 0.85rem;
+}
+
+.model-compare-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 20px;
+  overflow-y: auto;
+}
+
+.model-compare-select-label {
+  color: #e6edf3;
+  font-weight: 600;
+}
+
+.model-compare-body select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  background: #0d1117;
+  color: #e6edf3;
+  font: inherit;
+}
+
+.model-compare-status {
+  margin: 0;
+  color: #79c0ff;
+}
+
+.model-compare-error {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(248, 81, 73, 0.45);
+  border-radius: 8px;
+  background: rgba(248, 81, 73, 0.1);
+  color: #ff7b72;
+}
+
+.model-compare-results {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.model-compare-results figure {
+  min-width: 0;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid #30363d;
+  border-radius: 10px;
+  background: #0d1117;
+}
+
+.model-compare-results figcaption {
+  margin-bottom: 8px;
+  color: #c9d1d9;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.model-compare-results img {
+  display: block;
+  width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+  background: #080a10;
+}
+
+.model-compare-footer {
+  justify-content: flex-end;
+  border-top: 1px solid #30363d;
+}
+
+.compare-models-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+@media (max-width: 640px) {
+  .model-compare-header,
+  .model-compare-footer {
+    padding: 12px;
+  }
+
+  .model-compare-body {
+    padding: 12px;
+  }
+
+  .model-compare-results {
+    grid-template-columns: 1fr;
+  }
+}
