@@ -29,7 +29,7 @@ export default function LoginPage() {
         <div className="login-brand">🧙‍♂️ Depth Wizard</div>
         <p className="login-intro">Single-view height estimation and 3D exploration</p>
         <h1 id="login-title">{recovering ? "Choose a new password" : mode === "reset" ? "Reset password" : register ? "Create your account" : "Welcome back"}</h1>
-        <p className="login-help">{publicDemoOnly ? "Sign in to access your own saved history. This website offers an offline demo." : "Save your analyses and return to them whenever you need."}</p>
+        <p className="login-help">{publicDemoOnly ? "Sign in to access your own saved history. This website offers an offline demo." : "Sign in to run image analysis and save results to your private history."}</p>
         <form onSubmit={submit}>
           {register && !cloud && <label>Name<input name="name" autoComplete="name" value={values.name} onChange={field} maxLength={100} required disabled={busy} /></label>}
           {!recovering && <label>Email<input name="email" type="email" autoComplete="email" value={values.email} onChange={field} maxLength={254} required disabled={busy} /></label>}
@@ -42,10 +42,11 @@ export default function LoginPage() {
         {!recovering && <button className="login-toggle" disabled={busy} onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(""); setMessage(""); }}>
           {mode === "login" ? "New here? Create an account" : "Back to log in"}
         </button>}
+        {cloud && mode === "login" && !recovering && <button className="login-toggle" disabled={busy} onClick={() => { setMode("reset"); setError(""); setMessage(""); }}>Forgot password?</button>}
         {cloud && !recovering && <>
           {googleEnabled && <button className="login-toggle" disabled={busy} onClick={() => googleLogin().catch(err => setError(err.message))}>Sign in with Google</button>}
           <button className="login-submit" type="button" disabled={busy} onClick={enterGuest}>Try without login</button>
-          <p className="login-help">{publicDemoOnly ? "Explore the offline demo without an account. Cloud image analysis is disabled." : "Guest mode includes all analysis tools. Sign in to save history."}</p>
+          <p className="login-help">{publicDemoOnly ? "Explore the offline demo without an account. Cloud image analysis is disabled." : "Without an account, you can explore the precomputed demo. Sign in to process images."}</p>
         </>}
       </section>
     </main>

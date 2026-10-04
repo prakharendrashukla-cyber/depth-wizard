@@ -30,12 +30,7 @@ const DEFAULT_SAMPLES = [
   },
 ];
 
-const ACCEPTED_FORMATS = [
-  "image/png", "image/jpeg", "image/webp", "image/tiff",
-  "video/mp4", "video/avi", "video/quicktime", "video/webm",
-];
-
-function ImageUpload({ onUpload, loading, error }) {
+function ImageUpload({ onUpload, loading, error, allowVideo = false }) {
   const [dragActive, setDragActive] = useState(false);
   const [preview, setPreview] = useState(null);
   const [samples, setSamples] = useState(DEFAULT_SAMPLES);
@@ -75,9 +70,14 @@ function ImageUpload({ onUpload, loading, error }) {
       const isVideo = file.type.startsWith("video/");
       const isImage = file.type.startsWith("image/") || file.name.endsWith(".tif") || file.name.endsWith(".tiff");
 
+      if (isVideo && !allowVideo) {
+        setSampleError("Video analysis is currently disabled. Upload an image instead.");
+        return;
+      }
       if (!isVideo && !isImage) {
         return;
       }
+      setSampleError("");
 
       if (isVideo) {
         setPreview({ type: "video", url: URL.createObjectURL(file) });
@@ -86,7 +86,7 @@ function ImageUpload({ onUpload, loading, error }) {
       }
       onUpload(file);
     },
-    [onUpload]
+    [onUpload, allowVideo]
   );
 
   const handleSampleClick = async (sample) => {
@@ -159,15 +159,15 @@ function ImageUpload({ onUpload, loading, error }) {
         ) : (
           <>
             <div className="drop-icon">🛰</div>
-            <h3>Upload Satellite / Drone / 2D Image or Video</h3>
-            <p className="drop-desc">Drag & drop your single 2D image, GeoTIFF, or video file here</p>
+            <h3>Upload Satellite / Drone / 2D Image{allowVideo ? " or Video" : ""}</h3>
+            <p className="drop-desc">Drag & drop your single 2D image, GeoTIFF{allowVideo ? ", or video file" : ""} here</p>
             <p className="or">or</p>
             <div className="upload-buttons">
               <label className="file-label">
                 📁 Browse Files
                 <input
                   type="file"
-                  accept="image/*,.tif,.tiff,video/mp4,video/avi,video/quicktime,video/webm"
+                  accept={allowVideo ? "image/*,.tif,.tiff,video/mp4,video/avi,video/quicktime,video/webm" : "image/*,.tif,.tiff"}
                   onChange={onFileSelect}
                   hidden
                 />
@@ -180,7 +180,7 @@ function ImageUpload({ onUpload, loading, error }) {
                 📷 Live Camera
               </button>
             </div>
-            <span className="format-hint">Supports PNG, JPEG, WebP, GeoTIFF (.tif), MP4, AVI, MOV & Live Camera</span>
+            <span className="format-hint">Supports PNG, JPEG, WebP, GeoTIFF (.tif), Live Camera{allowVideo ? ", MP4, AVI, MOV" : ""}</span>
           </>
         )}
       </div>

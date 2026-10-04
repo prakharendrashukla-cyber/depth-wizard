@@ -26,6 +26,12 @@ def test_public_runtime_config_rejects_privileged_key(monkeypatch):
     assert "sb_secret_sensitive" not in denied.text
 
 
+def test_public_health_is_minimal():
+    response = TestClient(app).get("/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
 def test_shadow_areas_require_horizontal_calibration(owner):
     pixels = np.zeros((16, 16), dtype=np.uint8)
     pixels[4:12, 4:12] = 255
@@ -43,3 +49,18 @@ def test_shadow_areas_require_horizontal_calibration(owner):
     calibrated = client.post("/api/volume/shadow", json={**payload, "pixel_size_m": 2}).json()
     assert calibrated["shadow_area_m2"] + calibrated["illuminated_area_m2"] == pytest.approx(1024)
     assert client.post("/api/volume/shadow", json={**payload, "pixel_size_m": 0}).status_code == 422
+
+
+def test_inline_rasters_use_the_decoded_pixel_limit(owner, monkeypatch):
+    monkeypatch.setattr("app.main.MAX_IMAGE_PIXELS", 100)
+    buffer = io.BytesIO()
+    Image.new("L", (20, 20), 0).save(buffer, format="PNG")
+    payload = {"depth_map_b64": base64.b64encode(buffer.getvalue()).decode()}
+    response = TestClient(app).post("/api/volume", json=payload)
+    assert response.status_code == 413
+
+
+def test_ply_export_enforces_vertex_limit(owner):
+    oversized = base64.b64encode(b"\0" * (55_001 * 3 * 4)).decode()
+    response = TestClient(app).post("/api/export/ply", json={"positions": oversized, "colors": oversized})
+    assert response.status_code == 413

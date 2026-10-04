@@ -50,10 +50,12 @@ from app.database import init_db, get_db, User, BatchJobRecord, SessionLocal, no
 from app.identity import get_current_user, configure_secret, COOKIE_NAME
 from app.auth import router as auth_router, create_first_admin
 from app.analyses import router as analyses_router, save_analysis
-from app.config import ALLOWED_ORIGINS, MAX_BATCH_FILES, BATCH_LIMIT
+from app.config import ALLOWED_ORIGINS, MAX_BATCH_FILES, BATCH_LIMIT, MAX_IMAGE_PIXELS
 from app.safety import safe_path, read_upload, UploadLimitMiddleware
 from app.mesh import depth_to_point_cloud
 from app.height import analyze_height, generate_ply_file
+from app.quotas import read_user_quota, reserve_analysis, quota_settings
+from app.supabase_admin import cleanup_expired_analyses, delete_account_data
 
 # ── Logging ──────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -68,6 +70,11 @@ estimator_lock = threading.RLock()
 background_tasks: set[asyncio.Task] = set()
 
 MAX_IMAGE_DIM = 518  # Native Depth Anything V2 patch resolution (37*14=518) for 35% faster inference
+MAX_INFERENCE_WAIT_SECONDS = float(os.getenv("MAX_INFERENCE_WAIT_SECONDS", "10"))
+INFERENCE_CONCURRENCY = int(os.getenv("INFERENCE_CONCURRENCY", "1"))
+if not 1 <= INFERENCE_CONCURRENCY <= 4 or not 0.1 <= MAX_INFERENCE_WAIT_SECONDS <= 120:
+    raise RuntimeError("Inference concurrency and wait settings are outside the allowed range")
+inference_semaphore = asyncio.Semaphore(INFERENCE_CONCURRENCY)
 SAMPLE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sample_images")
 
 # ── Batch processor singleton ────────────────────────────────────────────
@@ -76,6 +83,53 @@ batch_processor = None
 
 def public_demo_only() -> bool:
     return os.getenv("PUBLIC_DEMO_ONLY", "false").lower() == "true"
+
+
+def feature_enabled(name: str) -> bool:
+    if name == "ENABLE_BATCH_ANALYSIS" and os.getenv("AUTH_PROVIDER", "local") == "supabase":
+        # The existing batch-job persistence is SQLite-backed and not durable on Cloud Run.
+        return False
+    return os.getenv(name, "false").strip().lower() == "true"
+
+
+def safe_filename(value: str | None) -> str:
+    name = (value or "upload").replace("\\", "/").rsplit("/", 1)[-1]
+    name = "".join(char for char in name if char.isprintable() and char not in "\r\n\t")[:255]
+    return name or "upload"
+
+
+async def limited_inference(function, *args, **kwargs):
+    try:
+        await asyncio.wait_for(inference_semaphore.acquire(), timeout=MAX_INFERENCE_WAIT_SECONDS)
+    except asyncio.TimeoutError:
+        raise HTTPException(503, "The analysis service is busy. Please retry shortly.",
+                            headers={"Retry-After": "10"}) from None
+    try:
+        return await asyncio.to_thread(function, *args, **kwargs)
+    finally:
+        inference_semaphore.release()
+
+
+async def reserve_cloud_analysis(request: Request, user):
+    """Apply shared admission controls to every authenticated compute route."""
+    if os.getenv("AUTH_PROVIDER", "local") != "supabase":
+        return
+    if not isinstance(user, dict) or not user.get("id"):
+        raise HTTPException(401, "Please log in")
+    await reserve_analysis(request, user["id"])
+    track_task(cleanup_expired_analyses(quota_settings()["retention_days"]))
+
+
+async def run_retention_maintenance():
+    while True:
+        if os.getenv("AUTH_PROVIDER", "local") == "supabase" and not public_demo_only():
+            try:
+                removed = await cleanup_expired_analyses(quota_settings()["retention_days"])
+                if removed:
+                    logger.info("Removed %s expired saved analyses", removed)
+            except Exception as exc:
+                logger.warning("Saved-analysis retention job failed (%s)", type(exc).__name__)
+        await asyncio.sleep(24 * 60 * 60)
 
 
 def get_estimator(model_id=None) -> DepthEstimator:
@@ -150,18 +204,25 @@ async def lifespan(app: FastAPI):
         create_first_admin()
     if not public_demo_only():
         track_task(asyncio.to_thread(get_estimator))
-    cleanup = track_task(cleanup_jobs())
+    track_task(cleanup_jobs())
+    track_task(run_retention_maintenance())
     yield
-    cleanup.cancel()
-    await asyncio.gather(*(task for task in list(background_tasks) if task.get_loop() is asyncio.get_running_loop()), return_exceptions=True)
+    tasks = [task for task in list(background_tasks) if task.get_loop() is asyncio.get_running_loop()]
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
     logger.info("Shutting down.")
 
 
 # ── App ──────────────────────────────────────────────────────────────────
+production = os.getenv("APP_ENV", "development").strip().lower() == "production"
 app = FastAPI(
     title="Depth Wizard API",
     description="Single-view depth estimation, 3D reconstruction, height analysis & geospatial intelligence",
     version="1.0.0",
+    docs_url=None if production else "/docs",
+    redoc_url=None if production else "/redoc",
+    openapi_url=None if production else "/openapi.json",
     lifespan=lifespan,
 )
 
@@ -169,14 +230,25 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
 )
 
 
 app.include_router(auth_router)
 app.include_router(analyses_router)
 app.add_middleware(UploadLimitMiddleware)
+
+
+def apply_security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Permissions-Policy", "camera=(self), microphone=(), geolocation=()")
+    response.headers.setdefault("X-Permitted-Cross-Domain-Policies", "none")
+    if production:
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return response
 
 @app.exception_handler(Exception)
 async def unexpected_error(request, exc):
@@ -192,27 +264,37 @@ async def rewrite_api_prefix(request: Request, call_next):
         request.scope["path"] = path[4:]
     elif path == "/api":
         request.scope["path"] = "/"
+    normalized_path = request.scope["path"]
+    if normalized_path == "/estimate/video" and not feature_enabled("ENABLE_VIDEO_ANALYSIS"):
+        return apply_security_headers(JSONResponse({"detail": "Video analysis is currently disabled."}, status_code=403,
+                            headers={"Cache-Control": "no-store"}))
+    if normalized_path == "/batch" or normalized_path.startswith("/batch/"):
+        if not feature_enabled("ENABLE_BATCH_ANALYSIS"):
+            return apply_security_headers(JSONResponse({"detail": "Batch analysis is currently disabled."}, status_code=403,
+                                headers={"Cache-Control": "no-store"}))
     if public_demo_only():
         blocked_roots = {"api", "auth", "analyses", "estimate", "export", "batch", "samples",
                          "models", "calibrate", "volume", "contour", "validate", "uncertainty",
                          "benchmarks", "docs", "redoc", "openapi.json"}
         root = request.scope["path"].strip("/").split("/")[0]
-        if request.scope["api_request"] or root in blocked_roots or request.method not in {"GET", "HEAD"}:
-            return JSONResponse({"detail": "Cloud analysis is disabled on this public demo."}, status_code=403,
-                                headers={"Cache-Control": "no-store"})
+        privacy_delete = request.scope["path"] == "/account" and request.method == "DELETE"
+        if ((request.scope["api_request"] and not privacy_delete) or root in blocked_roots
+                or (request.method not in {"GET", "HEAD"} and not privacy_delete)):
+            return apply_security_headers(JSONResponse({"detail": "Cloud analysis is disabled on this public demo."}, status_code=403,
+                                headers={"Cache-Control": "no-store"}))
     if os.getenv("AUTH_PROVIDER", "local") == "supabase" and request.scope["path"].split("/")[1] in {"auth", "analyses", "batch"}:
         # Supabase mode uses the SDK for private history. The batch UI calls
         # /estimate per file. Never mix local cookie identities with cloud users.
-        return JSONResponse({"detail": "Use Supabase for saved history in cloud mode"}, status_code=404)
+        return apply_security_headers(JSONResponse({"detail": "Use Supabase for saved history in cloud mode"}, status_code=404))
     if request.method not in {"GET", "HEAD", "OPTIONS"}:
         origin = request.headers.get("origin")
         same_origin = str(request.base_url).rstrip("/")
         if origin and origin not in ALLOWED_ORIGINS and origin != same_origin:
-            return JSONResponse({"detail": "Origin is not allowed"}, status_code=403)
+            return apply_security_headers(JSONResponse({"detail": "Origin is not allowed"}, status_code=403))
     response = await call_next(request)
     if request.scope.get("api_request") or COOKIE_NAME in request.cookies or request.scope["path"].startswith(("/auth", "/analyses")):
         response.headers["Cache-Control"] = "no-store"
-    return response
+    return apply_security_headers(response)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -226,6 +308,8 @@ async def browser_config():
         "supabasePublishableKey": os.getenv("SUPABASE_PUBLISHABLE_KEY", ""),
         "supabaseGoogleEnabled": os.getenv("SUPABASE_GOOGLE_ENABLED", "false").lower() == "true",
         "publicDemoOnly": public_demo_only(),
+        "batchAnalysisEnabled": feature_enabled("ENABLE_BATCH_ANALYSIS"),
+        "videoAnalysisEnabled": feature_enabled("ENABLE_VIDEO_ANALYSIS"),
     }
     key = config["supabasePublishableKey"]
     if key.startswith("sb_secret_"):
@@ -281,20 +365,42 @@ def _decode_image(raw: bytes) -> Image.Image:
             raise HTTPException(400, "Could not decode image.")
 
 
+def _decode_bounded_raster(raw: bytes) -> Image.Image:
+    """Decode a supplied raster only after bounding its compressed and decoded size."""
+    if not raw or len(raw) > 5 * 1024 * 1024:
+        raise HTTPException(413, "Raster input exceeds the configured size limit")
+    try:
+        with Image.open(io.BytesIO(raw)) as image:
+            if image.format not in {"PNG", "JPEG", "WEBP", "TIFF"}:
+                raise HTTPException(415, "Unsupported raster content")
+            if image.width < 1 or image.height < 1 or image.width * image.height > MAX_IMAGE_PIXELS:
+                raise HTTPException(413, "Raster dimensions exceed the configured pixel limit")
+            image.load()
+            return image.convert("L")
+    except HTTPException:
+        raise
+    except (Image.DecompressionBombError, OSError, SyntaxError, ValueError):
+        raise HTTPException(415, "Invalid or unsupported raster content") from None
+
+
+def _decode_bounded_raster_base64(value: str) -> Image.Image:
+    encoded = value.split(",")[-1].strip()
+    if not encoded or len(encoded) > 7 * 1024 * 1024:
+        raise HTTPException(413, "Raster input exceeds the configured size limit")
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except (ValueError, base64.binascii.Error):
+        raise HTTPException(400, "Invalid raster encoding") from None
+    return _decode_bounded_raster(raw)
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # ── ROUTES ───────────────────────────────────────────────────────────────
 # ══════════════════════════════════════════════════════════════════════════
 
 @app.get("/health")
 async def health():
-    if public_demo_only():
-        return {"status": "ok", "mode": "public-demo", "cloud_analysis_enabled": False, "version": "1.0.0"}
-    return {
-        "status": "ok",
-        "model": estimator.model_name if estimator else "loading",
-        "model_id": estimator.model_id if estimator else "loading",
-        "version": "1.0.0",
-    }
+    return {"status": "ok"}
 
 
 @app.get("/models")
@@ -347,6 +453,7 @@ async def get_sample_image(name: str):
 
 @app.post("/estimate", dependencies=[Depends(get_current_user)])
 async def estimate_depth(
+    request: Request,
     image: UploadFile = File(...),
     model: Optional[str] = Form(None),
     user: User = Depends(get_current_user),
@@ -361,6 +468,7 @@ async def estimate_depth(
       - metadata          dimensions, timing, model, etc.
     """
     raw = await read_upload(image)
+    await reserve_cloud_analysis(request, user)
     est = await asyncio.to_thread(get_estimator, model)
     img = _decode_image(raw)
 
@@ -377,22 +485,20 @@ async def estimate_depth(
     original_w, original_h = img.size
     img = _resize_image(img, MAX_IMAGE_DIM)
     proc_w, proc_h = img.size
-    logger.info(
-        "Processing %s  %dx%d -> %dx%d",
-        image.filename, original_w, original_h, proc_w, proc_h,
-    )
+    filename = safe_filename(image.filename)
+    logger.info("Processing uploaded image  %dx%d -> %dx%d", original_w, original_h, proc_w, proc_h)
 
     # ── Depth estimation (Async Non-blocking) ────────────────────────
-    t0 = time.time()
+    t0 = time.perf_counter()
     try:
-        depth = await asyncio.to_thread(est.estimate, img)
+        depth = await limited_inference(est.estimate, img)
     except Exception as exc:
         logger.exception("Depth inference failed using %s", est.model_id)
         raise HTTPException(
             503,
             f"Model '{est.model_id}' failed during inference; no alternate model was used.",
         ) from exc
-    depth_time = time.time() - t0
+    depth_time = time.perf_counter() - t0
     logger.info("Depth estimation: %.2fs", depth_time)
 
     # Ensure depth matches processed image size
@@ -424,7 +530,7 @@ async def estimate_depth(
             "depth_time_s": round(depth_time, 3),
             "pointcloud_time_s": round(pc_time, 3),
             "height_time_s": round(height_time, 3),
-            "filename": image.filename or "unknown",
+            "filename": filename,
         },
         "depth_map": _pil_to_base64(depth_colored, fmt="PNG"),
         "original_image": _pil_to_base64(img, fmt="JPEG", quality=85),
@@ -449,6 +555,27 @@ async def estimate_depth(
     return JSONResponse(content=response)
 
 
+@app.get("/quota")
+async def analysis_quota(user: User = Depends(get_current_user)):
+    """Return a signed-in user's remaining analysis and private-storage budget."""
+    if os.getenv("AUTH_PROVIDER", "local") != "supabase" or not isinstance(user, dict):
+        raise HTTPException(404, "Quota information is available in cloud mode")
+    return await read_user_quota(user["id"])
+
+
+@app.delete("/account", status_code=204)
+async def delete_cloud_account(user: User = Depends(get_current_user)):
+    """Delete the authenticated user's private files, rows, and Auth account."""
+    if os.getenv("AUTH_PROVIDER", "local") != "supabase" or not isinstance(user, dict):
+        raise HTTPException(404, "Account deletion is available in cloud mode")
+    try:
+        await delete_account_data(user["id"])
+    except Exception as exc:
+        logger.warning("Account deletion failed (%s)", type(exc).__name__)
+        raise HTTPException(503, "Account deletion could not be completed. Please retry or contact support.") from None
+    return Response(status_code=204)
+
+
 # ── GCP Calibration ──────────────────────────────────────────────────────
 
 class CalibrateRequest(BaseModel):
@@ -456,15 +583,15 @@ class CalibrateRequest(BaseModel):
     gcps: List[dict]  # [{x, y, known_height_m}]
 
 
-@app.post("/calibrate", dependencies=[Depends(get_current_user)])
-async def calibrate(req: CalibrateRequest):
+@app.post("/calibrate")
+async def calibrate(req: CalibrateRequest, request: Request, user: User = Depends(get_current_user)):
     """Calibrate depth map using Ground Control Points."""
     try:
         from app.calibration import calibrate_from_gcps
 
+        await reserve_cloud_analysis(request, user)
         # Decode depth map from base64 PNG
-        depth_bytes = base64.b64decode(req.depth_map_b64)
-        depth_img = Image.open(io.BytesIO(depth_bytes)).convert("L")
+        depth_img = _decode_bounded_raster_base64(req.depth_map_b64)
         depth_map = np.array(depth_img, dtype=np.float32)
 
         result = calibrate_from_gcps(depth_map, req.gcps)
@@ -488,14 +615,14 @@ class ContourRequest(BaseModel):
     format: str = "json"  # "json", "svg", "dxf"
 
 
-@app.post("/contour", dependencies=[Depends(get_current_user)])
-async def generate_contour(req: ContourRequest):
+@app.post("/contour")
+async def generate_contour(req: ContourRequest, request: Request, user: User = Depends(get_current_user)):
     """Generate contour lines and slope/aspect maps from depth data."""
     try:
         from app.contour import generate_contours, compute_slope_aspect, contours_to_svg, contours_to_dxf
 
-        depth_bytes = base64.b64decode(req.depth_map_b64)
-        depth_img = Image.open(io.BytesIO(depth_bytes)).convert("L")
+        await reserve_cloud_analysis(request, user)
+        depth_img = _decode_bounded_raster_base64(req.depth_map_b64)
         depth_map = np.array(depth_img, dtype=np.float32)
 
         # Generate contours
@@ -563,14 +690,14 @@ class VolumeRequest(BaseModel):
     ground_percentile: float = 10.0
 
 
-@app.post("/volume", dependencies=[Depends(get_current_user)])
-async def compute_volume(req: VolumeRequest):
+@app.post("/volume")
+async def compute_volume(req: VolumeRequest, request: Request, user: User = Depends(get_current_user)):
     """Estimate volume above ground from depth map."""
     try:
         from app.volume import estimate_volume
 
-        depth_bytes = base64.b64decode(req.depth_map_b64)
-        depth_img = Image.open(io.BytesIO(depth_bytes)).convert("L")
+        await reserve_cloud_analysis(request, user)
+        depth_img = _decode_bounded_raster_base64(req.depth_map_b64)
         depth_map = np.array(depth_img, dtype=np.float32)
 
         result = estimate_volume(depth_map, scale_factor=req.scale_factor, ground_percentile=req.ground_percentile)
@@ -593,14 +720,14 @@ class ShadowRequest(BaseModel):
     pixel_size_m: Optional[float] = Field(default=None, gt=0, le=100000)
 
 
-@app.post("/volume/shadow", dependencies=[Depends(get_current_user)])
-async def compute_shadow(req: ShadowRequest):
+@app.post("/volume/shadow")
+async def compute_shadow(req: ShadowRequest, request: Request, user: User = Depends(get_current_user)):
     """Compute shadow map from height data and sun position."""
     try:
         from app.volume import compute_shadow_map
 
-        depth_bytes = base64.b64decode(req.depth_map_b64)
-        depth_img = Image.open(io.BytesIO(depth_bytes)).convert("L")
+        await reserve_cloud_analysis(request, user)
+        depth_img = _decode_bounded_raster_base64(req.depth_map_b64)
         depth_map = np.array(depth_img, dtype=np.float32)
 
         result = compute_shadow_map(
@@ -633,17 +760,22 @@ async def compute_shadow(req: ShadowRequest):
 # ── Uncertainty ──────────────────────────────────────────────────────────
 
 @app.post("/uncertainty", dependencies=[Depends(get_current_user)])
-async def compute_uncertainty(image: UploadFile = File(...)):
+async def compute_uncertainty(
+    request: Request,
+    image: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+):
     """Compute per-pixel uncertainty/confidence map using multi-pass augmented inference."""
     try:
         from app.uncertainty import compute_uncertainty as _compute_uncertainty
 
-        est = await asyncio.to_thread(get_estimator)
         raw = await read_upload(image)
+        await reserve_cloud_analysis(request, user)
+        est = await asyncio.to_thread(get_estimator)
         img = _decode_image(raw)
         img = _resize_image(img, MAX_IMAGE_DIM)
 
-        result = await asyncio.to_thread(_compute_uncertainty, img, est, num_passes=5)
+        result = await limited_inference(_compute_uncertainty, img, est, num_passes=5)
         confidence = np.clip(np.asarray(result["confidence_map"], dtype=np.float32), 0.0, 1.0)
 
         # Return browser-ready visualizations and scalar metrics. The numerical
@@ -683,11 +815,13 @@ async def compute_uncertainty(image: UploadFile = File(...)):
 
 @app.post("/validate", dependencies=[Depends(get_current_user)])
 async def validate_depth(
+    request: Request,
     estimated: Optional[UploadFile] = File(None),
     ground_truth: Optional[UploadFile] = File(None),
     estimated_depth_base64: Optional[str] = Form(None),
     scale_factor: float = Form(1.0),
     model: str = Form("Depth Anything V2"),
+    user: User = Depends(get_current_user),
 ):
     """Compare estimated depth against ground truth DEM/DSM."""
     try:
@@ -696,20 +830,21 @@ async def validate_depth(
         est_img = None
         if estimated is not None:
             est_raw = await read_upload(estimated)
-            est_img = Image.open(io.BytesIO(est_raw)).convert("L")
+            est_img = _decode_bounded_raster(est_raw)
         elif estimated_depth_base64:
-            clean_b64 = estimated_depth_base64.split(",")[-1]
-            est_img = Image.open(io.BytesIO(base64.b64decode(clean_b64))).convert("L")
+            est_img = _decode_bounded_raster_base64(estimated_depth_base64)
 
         gt_img = None
         if ground_truth is not None:
             gt_raw = await read_upload(ground_truth)
-            gt_img = Image.open(io.BytesIO(gt_raw)).convert("L")
+            gt_img = _decode_bounded_raster(gt_raw)
 
         if est_img is None:
             raise ValueError("Estimated depth map is required")
         if gt_img is None:
             raise ValueError("Ground-truth reference raster is required")
+
+        await reserve_cloud_analysis(request, user)
 
         # Resize GT to match estimated if needed
         if est_img.size != gt_img.size:
@@ -743,19 +878,22 @@ async def validate_depth(
 
 @app.post("/estimate/video", dependencies=[Depends(get_current_user)])
 async def estimate_video(
+    request: Request,
     video: UploadFile = File(...),
     target_fps: float = Form(2.0, gt=0, le=30),
-    max_frames: int = Form(30, ge=1, le=120),
+    max_frames: int = Form(10, ge=1, le=30),
     temporal_smoothing: float = Form(0.3, ge=0, le=1),
+    user: User = Depends(get_current_user),
 ):
     """Process a video file frame-by-frame with temporal smoothing."""
     try:
         from app.video_processor import process_video
 
-        est = await asyncio.to_thread(get_estimator)
         raw = await read_upload(video, video=True)
+        await reserve_cloud_analysis(request, user)
+        est = await asyncio.to_thread(get_estimator)
 
-        result = await asyncio.to_thread(
+        result = await limited_inference(
             process_video,
             raw, est,
             target_fps=target_fps,
@@ -787,8 +925,15 @@ async def export_ply(req: ExportPlyRequest):
     try:
         pos_bytes = base64.b64decode(req.positions)
         col_bytes = base64.b64decode(req.colors)
+        max_float_bytes = 55000 * 3 * np.dtype(np.float32).itemsize
+        if len(pos_bytes) > max_float_bytes or len(col_bytes) > max_float_bytes:
+            raise HTTPException(413, "Point cloud exceeds the configured vertex limit")
+        if len(pos_bytes) % 12 or len(col_bytes) != len(pos_bytes):
+            raise HTTPException(400, "Point cloud arrays have invalid dimensions")
         positions = np.frombuffer(pos_bytes, dtype=np.float32).reshape(-1, 3)
         colors = np.frombuffer(col_bytes, dtype=np.float32).reshape(-1, 3)
+        if not np.isfinite(positions).all() or not np.isfinite(colors).all():
+            raise HTTPException(400, "Point cloud values must be finite")
         ply_bytes = generate_ply_file(positions, colors)
 
         safe_filename = req.filename if req.filename.endswith(".ply") else f"{req.filename}.ply"

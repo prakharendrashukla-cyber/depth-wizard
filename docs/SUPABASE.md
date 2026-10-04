@@ -1,12 +1,15 @@
-# Depth Wizard: Supabase setup and demo guide
+# Depth Wizard: Existing Supabase project and public-readiness guide
 
-The implementation is in this repository. No cloud project has been created or changed. Fill the environment files and run `supabase/setup.sql` to enable cloud login/history. Guest mode already works with blank Supabase values. The existing local cookie/SQLite mode remains available when `AUTH_PROVIDER` and `VITE_AUTH_PROVIDER` are omitted.
+**Current release instructions:** use the existing Depth Wizard Cloud Run service and Supabase project. Do not create another project or rerun `supabase/setup.sql`. The public-readiness changes are on the `codex/depth-wizard-public-safety` branch; the additive migration is still unapplied. Follow [DEPLOYMENT.md](../DEPLOYMENT.md) for the current branch, security gates, and unverified production prerequisites. Cloud Run access stays private until the user explicitly types `GO PUBLIC`.
+
+Guests can use the precomputed browser demo; all cloud image processing requires a verified signed-in account. This guide describes the existing project and service. Do not create a replacement project, rerun the original schema script, or follow old demo steps that assume guests can run inference.
 
 ## 1. What needs an account?
 
 | Feature | Login/database needed? |
 | --- | --- |
-| Upload an image, estimate depth, see heatmap/3D, flythrough, transects and histogram | No. Guests use the same model. |
+| Explore the bundled precomputed map and interactive 3D view | No. Guests do not run inference. |
+| Upload an image and run model inference | Yes: a verified signed-in Supabase account. |
 | Export the current result | No. |
 | Save and reopen personal analyses on another device | Yes: Auth + Postgres + private Storage. |
 | Change display name, delete saved analyses | Yes; only the owner. |
@@ -14,28 +17,39 @@ The implementation is in this repository. No cloud project has been created or c
 
 The SIH story should focus on the image-to-depth-to-3D workflow. A single monocular image gives relative depth; choosing a scale preset does not establish real metric accuracy. Use measured ground-control points for calibration and label sample terrain as illustrative. Supabase stores results; it does not run the Python model or host this Vite frontend.
 
-## 2. Create the Free project
+## 2. Existing Supabase project
 
-1. In the Supabase dashboard, create/select an organization on **Free**, then a project named `depth-wizard`. Do not add paid compute, branches or add-ons.
-2. Select **Mumbai (`ap-south-1`)** if offered. Prefer a specific region when you need India placement; the general APAC option can place the database elsewhere. Keep the database password in a password manager. [Regions](https://supabase.com/docs/guides/platform/regions)
-3. In the project's Connect dialog / API settings, copy the Project URL and **publishable** key (`sb_publishable_...`). A legacy `anon` key also works. These identify the project; SQL RLS supplies authorization. Never use `service_role`, `sb_secret_...`, a database password or a JWT signing secret in Vite.
-4. Open SQL Editor and run the complete `supabase/setup.sql`. This is rerunnable for the schema shipped here, not a migration of an unrelated existing `analyses` table. Use a dedicated prototype project. Policies combine with OR: remove unrelated permissive policies if you reused a project.
-5. In Storage, confirm bucket `depth-wizard` is **private**, maximum file size 2 MiB, with the MIME allowlist from the SQL.
-6. Run dashboard Security Advisor. Confirm both public tables have RLS enabled. Do not disable RLS to fix an empty screen.
+The release uses the existing project `depth-wizard` (`jricazzvfyqghbavsaqa`) and its existing private `depth-wizard` bucket. Keep its current region, data, and policies. Do **not** create another project or rerun `supabase/setup.sql`; it is the original bootstrap script, not the public-readiness migration.
+
+Use the existing project's Connect/API settings to verify the Project URL and public publishable key (`sb_publishable_...`). The browser only receives that public key. Never put `service_role`, `sb_secret_...`, a database password, or a JWT signing secret in Vite. The server quota and account-management paths require the service-role key in the existing Cloud Run service's Secret Manager binding. Run Security Advisor and confirm both public tables retain RLS; do not disable RLS to fix an empty screen.
+
+The additive migration `supabase/migrations/20261003164056_public_analysis_safety.sql` is not yet applied to the live project. Review and validate it against the existing schema in isolation first, then use the approved migration workflow. Do not substitute or edit the original setup script.
 
 Current docs list **500 MB database per project**, **1 GB Storage**, and **5 GB egress** on Free; several allowances are shared across the organization. Verify your dashboard and the [official billing table](https://supabase.com/docs/guides/platform/billing-on-supabase) before evaluation because limits can change. This implementation uses no paid Supabase feature.
 
 ### Environment files
 
-In `D:\depth-wizard`, copy `.env.example` to `.env` only if `.env` does not already exist. Otherwise edit the existing file. Set:
+For the current existing Cloud Run service, preserve the environment and secret bindings, then configure only the variables in the reviewed release plan. Never copy the service-role key into a local browser env file or any `VITE_` variable. For local Supabase development, the server settings are:
 
 ```dotenv
 AUTH_PROVIDER=supabase
 SUPABASE_URL=https://YOUR_PROJECT.supabase.co
 SUPABASE_PUBLISHABLE_KEY=sb_publishable_YOUR_KEY
-ALLOW_GUEST=true
-GUEST_REQUESTS_PER_MINUTE=10
+MAX_USER_DAILY_ANALYSES=5
+MAX_IP_ANALYSES_PER_MINUTE=5
+MAX_GLOBAL_DAILY_ANALYSES=50
+MAX_USER_STORAGE_MB=50
+UPLOAD_RETENTION_DAYS=365
+MAX_IMAGE_MB=20
+MAX_IMAGE_PIXELS=25000000
+INFERENCE_CONCURRENCY=1
+MAX_INFERENCE_WAIT_SECONDS=10
+TRUSTED_PROXY_HOPS=0
 ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000,https://YOUR-TUNNEL.trycloudflare.com
+# Set SUPABASE_SERVICE_ROLE_KEY only as a server Secret Manager binding.
+# ENABLE_BATCH_ANALYSIS=false
+# ENABLE_VIDEO_ANALYSIS=false
+# PUBLIC_DEMO_ONLY=false
 ```
 
 Copy `frontend/.env.supabase.example` to `frontend/.env.local` and fill:
@@ -47,15 +61,19 @@ VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_YOUR_KEY
 VITE_SUPABASE_GOOGLE=false
 ```
 
-Blank URL/key values are supported for guest-only development. `.env`, `.env.local` and `.env.*.local` are ignored by Git. All `VITE_` values are public after build. Changes require restarting Vite or rebuilding production. The Python server reads the root `.env`; frontend values are separate.
+Blank URL/key values are supported for local precomputed-demo development; they do not enable anonymous cloud inference. `.env`, `.env.local` and `.env.*.local` are ignored by Git. All `VITE_` values are public after build. Changes require restarting Vite or rebuilding production. The Python server reads the root `.env`; frontend values are separate.
 
 ### Email and optional Google
 
-Enable the Email provider in Authentication. For a private hackathon project with synthetic data, **confirmation OFF** removes an email dependency from account creation. Before public use, turn it **ON**, configure SMTP and validate email delivery. Turning it off allows unverified addresses; never use such an address as proof of identity.
+Keep the Email provider enabled, with email confirmation off as requested, so
+new signups can sign in without email confirmation. Public password-reset email
+delivery still depends on the configured SMTP provider.
 
-The built-in SMTP service currently sends only to authorized organization-team addresses, is limited to about **2 emails/hour**, and has no delivery SLA. Do not add judges as organization members to work around this. Precreate confirmed judge accounts in Auth → Users or configure a custom SMTP provider within its own free allowance. Password reset for arbitrary judge addresses needs working SMTP even if confirmation is off. [Email restrictions](https://supabase.com/docs/guides/auth/auth-smtp)
+The built-in SMTP service currently sends only to authorized organization-team addresses, is limited to about **2 emails/hour**, and has no delivery SLA. Do not add public users as organization members to work around this. If public password-reset delivery is needed, configure a provider that can deliver to public addresses and test reset delivery. [Email restrictions](https://supabase.com/docs/guides/auth/auth-smtp)
 
-In Auth → URL Configuration, set Site URL to the stable demo origin and allow these exact redirect URLs (replace the tunnel name):
+The existing Auth CAPTCHA switch was observed off during this review. This release leaves it off and does not request provider keys or CAPTCHA tokens.
+
+For the public Cloud Run release, keep Site URL set to `https://depth-wizard-133290700595.asia-south1.run.app` and allow `https://depth-wizard-133290700595.asia-south1.run.app/**`. These values already exist in the current project's Auth URL Configuration. Local development may additionally use these redirect URLs (replace the tunnel name):
 
 ```text
 http://localhost:5173/
@@ -122,7 +140,7 @@ FastAPI serves `frontend/dist` and `/api` from one origin. Add the resulting tun
 | Private Storage | `user_id/analysis_id/input.png` (or jpg/webp/tif), `depth.png`, `preview.jpg`, `cloud.json`, optional `cloud.ply`. |
 | Index | `(user_id, created_at desc, id)` supports ownership-filtered newest-first pages. Primary keys provide ID indexes. |
 
-`cloud.json` stores the downsampled point cloud so reopening restores 3D without another inference request. Images/base64 arrays stay out of Postgres. The original uploaded image is preserved; originals larger than 2 MiB can still be analysed, but saving reports a clear size error. The preview is a processed JPEG, useful even for TIFF sources. PLY is binary and uses relative coordinates; apply the saved `scale_factor` in your 3D tool. Scaled values are derived from raw metrics and the separately stored factor. Click **Save current scale** after choosing a preset or calibrating.
+`cloud.json` stores the downsampled point cloud so reopening restores 3D without another inference request. Images/base64 arrays stay out of Postgres. Current cloud history stores the server-returned resized JPEG as the saved source; the raw uploaded image and its original EXIF/GPS metadata are not uploaded to Storage. PLY is binary and uses relative coordinates; apply the saved `scale_factor` in your 3D tool. Scaled values are derived from raw metrics and the separately stored factor. Click **Save current scale** after choosing a preset or calibrating.
 
 All normal reads are one-shot requests, with 10 rows per history page and no realtime subscription. Uploads use `upsert:false`. Signed URLs expire after 60 seconds; they work for whoever holds the link during that interval, so they are not logged or stored in rows. Reopening obtains fresh links. [Private buckets](https://supabase.com/docs/guides/storage/buckets/fundamentals), [upload restrictions](https://supabase.com/docs/guides/storage/buckets/creating-buckets)
 
@@ -130,28 +148,28 @@ RLS restricts every row to `auth.uid() = user_id`; column grants prevent changin
 
 Save reserves an `uploading` row, uploads files, then marks it `ready`. Delete marks it `deleting`, removes files via Storage API, then removes the row. If networking fails, an incomplete history entry remains so **Delete** can retry. A database trigger prevents normal row deletion while its files remain. These are multiple HTTP operations, not a distributed transaction: avoid overlapping save/delete on the same entry and inspect interrupted operations before evaluation. Delete all analyses first before deleting an Auth user; otherwise the file-check trigger deliberately blocks the cascade.
 
-The database serializes per-user reservations and rejects more than **20** rows, including incomplete entries. On the next save, the UI first deletes the oldest analysis. This is a rolling-history policy: a subsequent upload failure does not restore that old entry. The UI explains this policy. A 20-item limit is per user, not a global 1 GB guarantee.
+The existing database serializes per-user history reservations and rejects more than **20** rows, including incomplete entries. On the next save, the UI first deletes the oldest analysis. This is a rolling-history policy: a subsequent upload failure does not restore that old entry. A separate storage-accounting trigger enforces the configured per-user byte limit for the current public-readiness release.
 
-Storage budget: at most five 2 MiB objects per entry means up to 200 MiB/user at the cap; typical entries are smaller. Start with 2–3 judge accounts, leave PLY off unless useful, keep 3–5 sample results/account, monitor dashboard Usage, and clean up near **700 MB**. Stop open signups after testing if only precreated judge accounts are needed. Signed downloads consume egress; avoid repeatedly refreshing large histories. Do not enable Realtime or image transformations for this workflow.
+Monitor Storage and egress usage in the existing project's dashboard. Signed downloads consume egress; avoid repeatedly refreshing large histories. Do not enable Realtime or image transformations for this workflow unless the app begins using them.
 
 ## 5. Code map and backend identity
 
 | File | Responsibility |
 | --- | --- |
 | `frontend/src/supabase/client.js` | Modular supabase-js v2 client, PKCE, persistent sessions and refresh. Version pinned in package.json/lock. |
-| `frontend/src/supabase/CloudAuthProvider.jsx` | Signup/login/logout, auth state listener, guest selection, password reset/change, Google. |
-| `frontend/src/components/LoginPage.jsx` | Forms, loading/error messages, optional guest entry. |
-| `frontend/src/main.jsx` | Protected history-capable app entry; guest entry bypasses login deliberately. |
+| `frontend/src/supabase/CloudAuthProvider.jsx` | Signup/login/logout, auth state listener, precomputed demo selection, password reset/change, Google. |
+| `frontend/src/components/LoginPage.jsx` | Forms, loading/error messages, precomputed demo entry. |
+| `frontend/src/main.jsx` | Protected history-capable app entry; demo entry uses only bundled precomputed results. |
 | `frontend/src/api.js` | Attaches access JWT to FastAPI; keeps binary exports working. |
 | `frontend/src/supabase/analyses.js` | Save/prune/cleanup, signed downloads, full-result reconstruction and profile updates. |
 | `frontend/src/components/AnalysisHistory.jsx` | List/open/delete, PLY download and display-name edit. |
-| `backend/app/supabase_identity.py` | Server-side verification and guest rate limit. |
+| `backend/app/supabase_identity.py` | Server-side verification; cloud analysis has no guest identity. |
 
 For ES256/RS256, FastAPI verifies signatures against the configured project's JWKS, with issuer, audience, expiry, subject and role checks. Cached public keys expire after five minutes. For legacy HS256 projects, it asks the Auth server `/auth/v1/user` using the publishable key; it never uses a shared signing secret. Bad Bearer tokens receive 401 rather than silently becoming guests. A verification outage receives 503. JWT validation alone does not immediately detect every user deletion or logout until token expiry. [Official JWT verification guidance](https://supabase.com/docs/guides/auth/jwts)
 
-Guests have 10 POST processing/export requests per minute per peer IP by default, with 429/Retry-After on excess. This is a lightweight **single-process prototype limit**, not DDoS protection. Run one worker. Behind cloudflared with `--no-proxy-headers`, guests share the proxy's IP budget; this conservative setting prevents forged forwarding headers bypassing it. Use a trusted proxy configuration/distributed limiter if you later run multiple workers. Logged-in processing uses verified identity. Cloud mode disables old `/auth`, `/analyses` and persistent `/batch` APIs; the current batch UI sends `/estimate` per image and continues to work. Batch/video results are session-only; automatic cloud history currently applies to single-image analyses.
+Cloud analysis requires verified identity and reserves shared per-user, per-IP, and global quotas in Postgres before inference. Batch and video are disabled by default; batch remains disabled in Supabase mode because the existing job store is local SQLite.
 
-Auth credentials and service keys are not needed for guest processing. Cloud mode does not persist guest images/results into the old SQLite history. Local-mode saved history and users are separate from Supabase; there is no automatic migration of previous local accounts or records.
+Guests do not invoke cloud analysis. Local-mode saved history and users are separate from Supabase; there is no automatic migration of previous local accounts or records.
 
 ## 6. Keep the Free project available and back it up
 
@@ -183,16 +201,16 @@ The script paginates rows/folders and writes JSON plus private file bytes beneat
 
 In Auth → Users, create two confirmed demo accounts using email aliases your team controls. Give each a different random password and no administrative privileges. Do not publish passwords in this repository. Distribute them privately on judge cards if needed. These accounts have **not yet been created**, since you chose configuration-first setup.
 
-Log in as each account and click bundled **ISRO Crater Terrain**, **Indian Cityscape Drone**, and **Mountain Terrain** images. This seeds realistic-looking, clearly illustrative results through the same RLS-protected save flow. Verify each is `ready`, change a scale preset, click Save current scale, refresh and reopen. Three small results per account is enough; avoid mass seeding. Demonstrate Guest → analysis → sign in → saved history with a fresh image.
+Log in with test accounts and verify only in an isolated environment. Bundled **ISRO Crater Terrain**, **Indian Cityscape Drone**, and **Mountain Terrain** previews are precomputed and clearly illustrative; they do not demonstrate a new model run. Do not create test accounts or seed the live project without a release decision.
 
-If internet fails, use the running localhost frontend and backend with cached model weights. Choose **Try without login**; cloud login and history need internet. Keep the model downloaded and run an actual inference before travelling. If the model backend fails, click **Open offline demo (precomputed)**: the bundled real-model result supports client-side 3D/flythrough, basic height charts and PNG viewing without another inference. It is visibly labelled precomputed. Server operations such as new inference, contour/volume services, calibration and some exports still need FastAPI. The production service worker caches the demo and visited static assets; open the offline demo and 3D view before going offline. Development Vite does not install that service worker.
+If internet fails, use the existing local development setup with cached model weights. Local inference can be tested with a local account; the public cloud flow requires online Supabase Auth and history. **Open offline demo (precomputed)** displays bundled results without inference and is visibly labelled precomputed. Server operations such as inference, contour/volume services, calibration and some exports require FastAPI. The production service worker caches the demo and visited static assets; open the offline demo and 3D view before going offline. Development Vite does not install that service worker.
 
-For results-day availability, keep the host awake, plugged in, with the backend and tunnel running; use a stable named tunnel/domain when available, keep redirect URLs current, and check Supabase status and usage daily. Keep a screen recording and local PDF/PLY/JSON exports on two drives. No Free-plan setup can promise uninterrupted availability through an unspecified results date.
+For results-day availability, monitor the existing Cloud Run and Supabase services, keep redirect URLs current, and check usage daily. No Free-plan setup can promise uninterrupted availability through an unspecified results date.
 
 ```mermaid
 flowchart LR
-  Judge[Judge: guest or signed in] --> UI[React + Vite + Three.js]
-  UI -->|image; optional verified JWT| API[FastAPI: depth model on team laptop]
+  Judge[Visitor or signed-in user] --> UI[React + Vite + Three.js]
+  UI -->|verified user JWT and image| API[Existing FastAPI Cloud Run service]
   API -->|depth + point cloud + metrics| UI
   UI -->|email or Google| Auth[Supabase Auth]
   UI -->|user JWT: owner-only rows| DB[(Postgres + RLS)]
@@ -230,26 +248,26 @@ Day-before checklist:
 - Signup with confirmation setting as intended; log in, log out, log in again and refresh. Use an incognito window for the second user.
 - Request reset with an actual deliverable email; open the link in the initiating browser, set a new password and log in with it. Test expired links and a rejected password.
 - If enabled, test Google login on the final tunnel origin. Test logout and session refresh after waiting for access-token renewal.
-- Guest: process, fly through, export, refresh and confirm no private history appears. Guest results are ephemeral.
+- Guest: open the precomputed demo, fly through, export, and confirm no private history appears. The guest flow does not run model inference.
 - Signed in: save, reopen full 3D, change/save scale, edit name, optionally download PLY, delete and confirm both row and files are gone.
 - User B cannot query/edit/delete User A's row or sign/download A's Storage path. SQL Editor as owner bypasses RLS: use the live SDK test, not an owner SQL query, to demonstrate isolation.
 - Interrupt a save/delete; confirm the incomplete entry can be removed. Test a >2 MiB original: inference succeeds but cloud saving explains the limit.
-- Test 20 entries on a disposable account, then another: the UI prunes the oldest; a direct 21st reservation is rejected. Test guest 429 and recovery after a minute.
+- Test 20 entries on a disposable account, then another: the UI prunes the oldest; a direct 21st reservation is rejected. Verify the database-backed per-user, per-IP and global analysis limits reject excess signed-in requests.
 - Run a real model inference, check free quotas, resume any paused project, verify backups, rehearse the offline button and keep chargers/tunnel ready.
 
 | Symptom | Fix |
 | --- | --- |
-| Cloud history is not configured | Fill both Vite public variables, restart/rebuild. Guest mode still works. |
+| Cloud history is not configured | Verify the two Vite public variables, project status and Auth configuration, then rebuild. The precomputed demo remains available; cloud analysis requires sign-in. |
 | Login succeeds, profile/history fails | Run all SQL; confirm trigger/backfill, table grants and RLS. Check dashboard logs. Never use a service key to bypass the UI error. |
 | Empty reads / RLS violation | Check the current signed-in UID, owner column, reserved path and `uploading` status. Old local IDs are not Supabase UUIDs. |
 | Invalid redirect / PKCE verifier missing | Match exact scheme/host/port/path/query, update tunnel URLs, use the initiating browser and request a fresh link. |
 | No reset/confirmation email | Check SMTP recipient restrictions, rate limits, spam folder and delivery logs. Configuration OFF only skips signup confirmation, not reset delivery. |
 | 401 / expired session | Log in again; check backend project URL matches Vite. Verify signing-key rotation and clock. Do not strip an invalid token and pretend it is a guest. |
-| 503 verifying login | Verify project status, server internet and JWKS/Auth endpoint availability; guest processing remains available if enabled. |
+| 503 verifying login | Verify project status, server internet and JWKS/Auth endpoint availability. Only the bundled precomputed demo is available without a verified cloud identity. |
 | CORS / Origin not allowed | Add the exact frontend origin to ALLOWED_ORIGINS and restart FastAPI. Different ports and localhost vs 127.0.0.1 are different origins. |
 | Upload too large / quota | Use an original below 2 MiB, omit PLY, delete old results through the app and check organization usage. |
 | Download link expired | Reopen history to obtain a fresh signed link. |
 | Delete fails | Retry; files must be removed before the row. Keep the incomplete entry until cleanup succeeds. |
-| Missing relation/index | Re-run this project's SQL. Postgres does not use Firebase-style generated-index links; verify the index exists in Database → Indexes. |
+| Missing relation/index | Confirm the original schema is present and review the pending additive migration. Do not rerun `supabase/setup.sql` on the existing project. Postgres does not use Firebase-style generated-index links; verify the index exists in Database → Indexes. |
 
 Current APIs and quotas were checked against official Supabase docs during implementation. Recheck those linked pages and the [changelog](https://supabase.com/changelog) when your evaluation approaches.

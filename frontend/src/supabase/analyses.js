@@ -42,16 +42,16 @@ export async function deleteAnalysis(id, client = requireSupabase()) {
   checked(await client.from("analyses").delete().eq("id", id).select("id").single());
 }
 export async function saveAnalysis({ result, original, userId, includePly = false }, client = requireSupabase()) {
-  const type = original.type || (/\.tiff?$/i.test(original.name) ? "image/tiff" : "");
-  const extension = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/tiff": "tif" }[type];
-  if (!extension) throw new Error("History accepts PNG, JPEG, WebP or TIFF images.");
+  if (!result.original_image) throw new Error("The sanitized image preview is missing; run the analysis again to save it.");
   const id = crypto.randomUUID(), prefix = `${userId}/${id}`;
   const { original_image, depth_map, point_cloud, analysis_id, ...report } = result;
-  const row = { id, user_id: userId, filename: original.name.slice(0, 255), model_id: result.model_id,
-    image_path: `${prefix}/input.${extension}`, depth_path: `${prefix}/depth.png`, preview_path: `${prefix}/preview.jpg`,
+  const filename = (original.name || "upload").replace(/[\u0000-\u001f\u007f]/g, "").replace(/[\\/]/g, "_").slice(0, 255) || "upload";
+  const row = { id, user_id: userId, filename, model_id: result.model_id,
+    image_path: `${prefix}/input.jpg`, depth_path: `${prefix}/depth.png`, preview_path: `${prefix}/preview.jpg`,
     cloud_path: `${prefix}/cloud.json`, ply_path: includePly ? `${prefix}/cloud.ply` : null,
     metrics: result.height_analysis || {}, report, scale_factor: 1, scale_preset: "relative", status: "uploading" };
-  const files = [[row.image_path, new Blob([original], { type })], [row.depth_path, base64Blob(depth_map, "image/png")],
+  const sanitizedInput = base64Blob(original_image, "image/jpeg");
+  const files = [[row.image_path, sanitizedInput], [row.depth_path, base64Blob(depth_map, "image/png")],
     [row.preview_path, base64Blob(original_image, "image/jpeg")], [row.cloud_path, new Blob([JSON.stringify(point_cloud)], { type: "application/json" })]];
   if (includePly) files.push([row.ply_path, makePly(point_cloud)]);
   if (files.some(([, blob]) => blob.size > MAX_FILE_BYTES)) throw new Error("Analysis finished, but a file exceeds the 2 MiB cloud limit. Use a smaller original image to save history.");
