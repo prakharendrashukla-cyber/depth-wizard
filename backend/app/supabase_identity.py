@@ -1,17 +1,11 @@
-"""Optional Supabase identity. No service key or JWT signing secret is needed."""
+"""Verify Supabase access tokens; guest identity is never accepted for cloud APIs."""
 import os
-import threading
-import time
-from collections import OrderedDict, deque
 from functools import lru_cache
 from uuid import UUID
 
 import httpx
 import jwt
 from fastapi import HTTPException, Request
-
-_attempts = OrderedDict()
-_lock = threading.Lock()
 
 
 @lru_cache(maxsize=4)
@@ -59,30 +53,10 @@ def verify_supabase_token(token):
 
 def processing_identity(request: Request):
     header = request.headers.get("authorization")
-    if header:
-        scheme, _, token = header.partition(" ")
-        if scheme.lower() != "bearer" or not token.strip():
-            raise HTTPException(401, "Invalid authorization header")
-        # A bad token is never silently downgraded to guest access.
-        return verify_supabase_token(token.strip())
-    if os.getenv("ALLOW_GUEST", "true").lower() != "true":
+    if not header:
         raise HTTPException(401, "Please log in")
-    if request.method == "POST":
-        # Do not trust arbitrary forwarded headers. Behind an unconfigured proxy,
-        # guests share one budget; configure a trusted proxy before widening this.
-        ip = request.client.host if request.client else "unknown"
-        now = time.monotonic()
-        limit = int(os.getenv("GUEST_REQUESTS_PER_MINUTE", "10"))
-        with _lock:
-            while _attempts and next(iter(_attempts.values()))[-1] <= now - 60:
-                _attempts.popitem(last=False)
-            if ip not in _attempts and len(_attempts) >= 10_000:
-                raise HTTPException(429, "Server is busy. Try again shortly", headers={"Retry-After": "60"})
-            attempts = _attempts.setdefault(ip, deque())
-            while attempts and attempts[0] <= now - 60:
-                attempts.popleft()
-            if len(attempts) >= limit:
-                raise HTTPException(429, "Guest limit reached. Wait a minute or log in", headers={"Retry-After": "60"})
-            attempts.append(now)
-            _attempts.move_to_end(ip)
-    return None
+    scheme, _, token = header.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(401, "Invalid authorization header")
+    # A missing, invalid, anonymous, or forged token is never silently downgraded.
+    return verify_supabase_token(token.strip())

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase, requireSupabase, authRedirect } from "./client";
 import { authenticateWithEmail, authErrorMessage } from "./authActions";
 import { runtimeConfig } from "../runtimeConfig";
+import { apiFetch } from "../api";
 
 export default function CloudAuthProvider({ context: Context, children }) {
   const [user, setUser] = useState(null);
@@ -57,6 +58,11 @@ export default function CloudAuthProvider({ context: Context, children }) {
     if (error) throw error;
     setRecovering(false); history.replaceState({}, "", location.pathname);
   }
+  async function deleteAccount() {
+    await apiFetch("/api/account", { method: "DELETE" });
+    await requireSupabase().auth.signOut({ scope: "local" });
+    setUser(null); setGuest(false); sessionStorage.removeItem("depthwizard-guest");
+  }
   async function googleLogin() {
     const { error } = await requireSupabase().auth.signInWithOAuth({ provider: "google", options: { redirectTo: authRedirect() } });
     if (error) throw error;
@@ -64,6 +70,6 @@ export default function CloudAuthProvider({ context: Context, children }) {
   const enterGuest = () => { sessionStorage.setItem("depthwizard-guest", "yes"); setGuest(true); };
   const leaveGuest = () => { sessionStorage.removeItem("depthwizard-guest"); setGuest(false); };
   return <Context.Provider value={{ user, loading, error, guest, recovering, authenticate, logout,
-    resetPassword, updatePassword, enterGuest, leaveGuest, googleLogin,
+    resetPassword, updatePassword, deleteAccount, enterGuest, leaveGuest, googleLogin,
     googleEnabled: runtimeConfig.supabaseGoogleEnabled ?? (import.meta.env.VITE_SUPABASE_GOOGLE === "true"), cloud: true }}>{children}</Context.Provider>;
 }

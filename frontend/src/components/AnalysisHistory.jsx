@@ -4,7 +4,7 @@ import { cloudMode } from "../supabase/client";
 import { listAnalyses, openAnalysis, deleteAnalysis, signedFile, loadProfile, saveProfile } from "../supabase/analyses";
 import { useAuth } from "../AuthContext";
 export default function AnalysisHistory({ onOpen, onClose }) {
-  const { user } = useAuth();
+  const { user, deleteAccount } = useAuth();
   const [name, setName] = useState("");
   const [profileMessage, setProfileMessage] = useState("");
   const [data, setData] = useState({ items: [], total: 0 });
@@ -35,6 +35,14 @@ export default function AnalysisHistory({ onOpen, onClose }) {
     } catch (err) { setError(err.message); }
     finally { setBusy(false); }
   }
+  async function removeAccount() {
+    const approved = window.confirm("Permanently delete your account, saved analyses, and private files?");
+    if (!approved || window.prompt('Type DELETE to permanently remove your account and saved data.') !== "DELETE") return;
+    setBusy(true); setError("");
+    try { await deleteAccount(); onClose(); }
+    catch (err) { setError(err.message); }
+    finally { setBusy(false); }
+  }
   return <div className="modal-overlay" onClick={event => { if(event.target === event.currentTarget) onClose(); }}>
     <section className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="history-title">
       <div className="modal-header"><h2 id="history-title">My Analyses</h2><button className="modal-close" onClick={onClose} aria-label="Close history">✕</button></div>
@@ -63,6 +71,11 @@ export default function AnalysisHistory({ onOpen, onClose }) {
         <button className="header-btn" disabled={busy || page === 1} onClick={() => setPage(page - 1)}>Previous</button>{" "}
         <span>Page {page}</span>{" "}
         <button className="header-btn" disabled={busy || page * 10 >= data.total} onClick={() => setPage(page + 1)}>Next</button>
+        {cloudMode && <section className="account-delete-section" aria-labelledby="delete-account-title">
+          <h3 id="delete-account-title">Account and data</h3>
+          <p>Deleting your account removes your saved analyses and private files from this Depth Wizard project.</p>
+          <button className="header-btn account-delete-button" disabled={busy} onClick={removeAccount}>Delete my account and data</button>
+        </section>}
       </div>
     </section>
   </div>;

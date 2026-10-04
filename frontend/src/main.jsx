@@ -11,7 +11,10 @@ function AuthenticatedApp() {
   const { user, loading, guest, recovering } = useAuth();
   if (loading) return <p role="status">Loading...</p>;
   if (publicDemoOnly) return <PublicDemoApp key={user?.id || "public"} />;
-  return !recovering && (user || guest) ? <App key={user?.id || "guest"} /> : <LoginPage />;
+  if (recovering) return <LoginPage />;
+  if (user) return <App key={user.id} />;
+  if (guest) return <PublicDemoApp key="guest" />;
+  return <LoginPage />;
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(

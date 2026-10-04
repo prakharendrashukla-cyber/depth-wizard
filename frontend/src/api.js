@@ -6,9 +6,11 @@ export class ApiError extends Error {
 }
 /** Cookie-aware transport; keeps the Response interface for binary exports. */
 export async function apiFetch(path, options = {}) {
-  if (publicDemoOnly) throw new ApiError("Cloud analysis is disabled on this public demo.", 403);
   const relative = path.replace(/^\/api(?=\/|$)/, "");
   if (!relative.startsWith("/") || relative.startsWith("//")) throw new Error("Use a relative API path");
+  if (publicDemoOnly && !(relative === "/account" && (options.method || "GET").toUpperCase() === "DELETE")) {
+    throw new ApiError("Cloud analysis is disabled on this public demo.", 403);
+  }
   const headers = new Headers(options.headers);
   const cloud = authProvider === "supabase";
   if (cloud) {

@@ -41,9 +41,13 @@ def test_api_and_cors(client):
     assert "access-control-allow-origin" not in r.headers
 
 def test_uploads(client, monkeypatch):
+    monkeypatch.setenv("ENABLE_VIDEO_ANALYSIS", "true")
     assert client.post("/estimate", files={"image": ("x.txt", b"bad", "text/plain")}).status_code == 415
     assert client.post("/estimate", files={"image": ("x.png", b"bad", "image/png")}).status_code == 415
     monkeypatch.setattr("app.safety.IMAGE_LIMIT", 10)
+    assert client.post("/estimate", files={"image": ("x.png", png(), "image/png")}).status_code == 413
+    monkeypatch.setattr("app.safety.IMAGE_LIMIT", 20 * 1024 * 1024)
+    monkeypatch.setattr("app.safety.MAX_IMAGE_PIXELS", 100)
     assert client.post("/estimate", files={"image": ("x.png", png(), "image/png")}).status_code == 413
     assert client.post("/estimate/video", files={"video": ("x.mp4", b"bad", "video/mp4")}).status_code == 415
     r = client.post("/estimate", content=b"x", headers={"Content-Length": str(200*1024*1024)})

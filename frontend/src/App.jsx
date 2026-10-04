@@ -1,6 +1,7 @@
 import { useAuth } from "./AuthContext";
 import { apiFetch } from "./api";
 import { cloudMode } from "./supabase/client";
+import { batchAnalysisEnabled, videoAnalysisEnabled } from "./runtimeConfig.js";
 import { saveAnalysis, saveScale } from "./supabase/analyses";
 import { useState, useEffect, useLayoutEffect, useCallback, useRef, lazy, Suspense } from "react";
 const AnalysisHistory = lazy(() => import("./components/AnalysisHistory"));
@@ -128,6 +129,8 @@ function App() {
   const [scaleFactor, setScaleFactor] = useState(1.0);
   const [measurement, setMeasurement] = useState(null);
   const [backendHealth, setBackendHealth] = useState(null);
+  const [quota, setQuota] = useState(null);
+  const [quotaMessage, setQuotaMessage] = useState("");
   const [isExporting, setIsExporting] = useState(false);
 
   // ── View state ─────────────────────────────────────────────────────────
@@ -169,6 +172,17 @@ function App() {
       .catch(() => setBackendHealth({ status: "offline", model: "unknown" }));
   }, []);
 
+  const refreshQuota = useCallback(async () => {
+    if (!cloudMode || !user) return;
+    try {
+      setQuota(await (await apiFetch("/api/quota")).json());
+      setQuotaMessage("");
+    } catch {
+      setQuotaMessage("Analysis protection is unavailable. New cloud analysis is paused until it recovers.");
+    }
+  }, [user?.id]);
+  useEffect(() => { refreshQuota(); }, [refreshQuota]);
+
   // ── Image upload handler ───────────────────────────────────────────────
   const handleUpload = async (file, modelOverride = null, { preserveResult = false } = {}) => {
     setLoading(true);
@@ -209,6 +223,7 @@ function App() {
       setOfflineDemo(false); setMeasurement(null); setShowCalibration(false); setActiveTab("3d");
       setScaleFactor(1.0);
       if (cloudMode && user) await saveCurrent(data, file);
+      await refreshQuota();
       return true;
     } catch (err) {
       setError(err.message || "Failed to process image.");
@@ -361,24 +376,25 @@ function App() {
             <button className="header-btn tour-btn" onClick={() => setShowDemoTour(true)} title="Guided Demo Tour">
               🎯 Demo Tour
             </button>
-            <button className="header-btn batch-btn" onClick={() => setShowBatchProcessor(true)} title="Batch Process Multiple Images">
-              📦 Batch Mode
-            </button>
-            <button className="header-btn video-btn" onClick={() => setShowVideoProcessor(true)} title="Process Video">
-              📹 Video
-            </button>
+            {batchAnalysisEnabled && <button className="header-btn batch-btn" onClick={() => setShowBatchProcessor(true)} title="Batch Process Multiple Images">📦 Batch Mode</button>}
+            {videoAnalysisEnabled && <button className="header-btn video-btn" onClick={() => setShowVideoProcessor(true)} title="Process Video">📹 Video</button>}
           </div>
         </div>
       </header>
 
       {/* ── Main Workspace ── */}
       <main className="app-main">
+        {cloudMode && user && <div className="privacy-note" role="note">
+          <strong>Private analysis:</strong> images are processed on the existing Depth Wizard server. Saved inputs are resized and stripped of image metadata; files stay private, with retention cleanup scheduled after {quota?.retention_days ?? "the configured"} days while the service is active. Depth values are relative until calibrated with reference measurements.
+          {quota && <span className="quota-summary"> Runs today: {quota.daily_used}/{quota.daily_limit}. Private storage: {(quota.storage_used_bytes / 1048576).toFixed(1)}/{(quota.storage_limit_bytes / 1048576).toFixed(0)} MiB.</span>}
+          {quotaMessage && <span className="quota-warning" role="status"> {quotaMessage}</span>}
+        </div>}
         {!result ? (
           <>
             <div className="pre-upload-model-selector">
               <ModelSelector currentModel={currentModel} onModelChange={handleModelChange} disabled={loading} />
             </div>
-            <ImageUpload onUpload={handleUpload} loading={loading} error={error} />
+            <ImageUpload onUpload={handleUpload} loading={loading} error={error} allowVideo={videoAnalysisEnabled} />
           </>
         ) : (
           <div className="result-view">
@@ -575,7 +591,7 @@ function App() {
         />
       )}
 
-      {showVideoProcessor && (
+      {showVideoProcessor && videoAnalysisEnabled && (
         <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setShowVideoProcessor(false); }}>
           <div className="modal-panel modal-wide">
             <div className="modal-header">
@@ -589,7 +605,7 @@ function App() {
         </div>
       )}
 
-      {showBatchProcessor && (
+      {showBatchProcessor && batchAnalysisEnabled && (
         <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setShowBatchProcessor(false); }}>
           <div className="modal-panel modal-wide">
             <div className="modal-header">

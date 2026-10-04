@@ -62,16 +62,22 @@ def test_remote_cookie_and_origin():
 
 
 @pytest.mark.parametrize("path", [
-    "/estimate", "/estimate/video", "/calibrate", "/contour", "/volume",
-    "/volume/shadow", "/uncertainty", "/validate", "/export/ply",
-    "/export/report", "/export/pdf", "/batch",
+    "/estimate", "/calibrate", "/contour", "/volume", "/volume/shadow",
+    "/uncertainty", "/validate", "/export/ply", "/export/report", "/export/pdf",
 ])
 def test_processing_requires_auth(path):
     with TestClient(app, base_url="http://localhost") as client:
         assert client.post(path).status_code == 401
 
 
-def test_batch_ownership_survives_memory_expiry():
+@pytest.mark.parametrize("path", ["/estimate/video", "/batch"])
+def test_optional_processing_is_disabled_by_default(path):
+    with TestClient(app, base_url="http://localhost") as client:
+        assert client.post(path).status_code == 403
+
+
+def test_batch_ownership_survives_memory_expiry(monkeypatch):
+    monkeypatch.setenv("ENABLE_BATCH_ANALYSIS", "true")
     from app.database import BatchJobRecord
     with TestClient(app, base_url="http://localhost") as a, TestClient(app, base_url="http://localhost") as b:
         register(a)
