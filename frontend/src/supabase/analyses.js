@@ -4,6 +4,39 @@ export const BUCKET = "depth-wizard";
 export const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const paths = row => [row.image_path, row.depth_path, row.preview_path, row.cloud_path, row.ply_path].filter(Boolean);
 function checked({ data, error }) { if (error) throw error; return data; }
+export function sanitizeAnalysisError(error, defaultKind = "generic") {
+  if (!error) return "please try again";
+  const msg = (error.message || error.error_description || String(error || "")).toLowerCase();
+  const status = error.status || error.statusCode;
+
+  // Session expired: 401, JWT expired, missing token, unverified user
+  if (status === 401 || msg.includes("jwt") || msg.includes("session expired") || msg.includes("not authenticated") || msg.includes("verified user") || msg.includes("unauthorized")) {
+    return "session expired";
+  }
+
+  // Storage full: limit reached
+  if (msg.includes("user storage limit reached") || msg.includes("storage limit") || msg.includes("storage full")) {
+    return "storage full";
+  }
+
+  // Daily limit reached: 429 or quota codes
+  if (status === 429 || msg.includes("daily limit") || msg.includes("daily_limit") || msg.includes("capacity reached")) {
+    return "daily limit reached";
+  }
+
+  // Specific file/payload size limit checks (safe client validations)
+  if (msg.includes("2 mib") || msg.includes("cloud history limit") || msg.includes("sanitized image preview is missing")) {
+    return error.message;
+  }
+
+  // Upload failed: upload loop errors, storage API issues
+  if (defaultKind === "upload" || msg.includes("upload") || msg.includes("storage size metadata")) {
+    return "upload failed";
+  }
+
+  // Generic fallback: never expose raw SQL, check constraints, or stack traces
+  return "please try again";
+}
 export function base64Blob(value, type) {
   const bytes = Uint8Array.from(atob(value), character => character.charCodeAt(0));
   return new Blob([bytes], { type });
@@ -56,18 +89,24 @@ export async function saveAnalysis({ result, original, userId, includePly = fals
   if (includePly) files.push([row.ply_path, makePly(point_cloud)]);
   if (files.some(([, blob]) => blob.size > MAX_FILE_BYTES)) throw new Error("Analysis finished, but a file exceeds the 2 MiB cloud limit. Use a smaller original image to save history.");
   if (new Blob([JSON.stringify(report)]).size > 60000 || new Blob([JSON.stringify(row.metrics)]).size > 60000) throw new Error("Report exceeds the cloud history limit.");
-  const previous = checked(await client.from("analyses").select("id").order("created_at", { ascending: true }).order("id"));
-  // Rolling history: remove the oldest first. A failed new upload does not restore it.
-  if (previous.length >= 20) await deleteAnalysis(previous[0].id, client);
-  checked(await client.from("analyses").insert(row));
+  let previous;
+  try {
+    previous = checked(await client.from("analyses").select("id").order("created_at", { ascending: true }).order("id"));
+    // Rolling history: remove the oldest first. A failed new upload does not restore it.
+    if (previous.length >= 20) await deleteAnalysis(previous[0].id, client);
+    checked(await client.from("analyses").insert(row));
+  } catch (error) {
+    throw new Error(sanitizeAnalysisError(error, "save"));
+  }
   try {
     for (const [path, blob] of files) checked(await client.storage.from(BUCKET).upload(path, blob, { upsert: false, contentType: blob.type, cacheControl: "60" }));
     checked(await client.from("analyses").update({ status: "ready" }).eq("id", id).select("id").single());
     return id;
   } catch (error) {
+    const safeMessage = sanitizeAnalysisError(error, "upload");
     try { await deleteAnalysis(id, client); }
-    catch { throw new Error(`${error.message}. An incomplete entry remains in My Analyses; delete it to retry cleanup.`); }
-    throw error;
+    catch { throw new Error(`${safeMessage}. An incomplete entry remains in My Analyses; delete it to retry cleanup.`); }
+    throw new Error(safeMessage);
   }
 }
 export async function signedFile(path) {
