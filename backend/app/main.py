@@ -82,7 +82,7 @@ batch_processor = None
 
 
 def public_demo_only() -> bool:
-    return os.getenv("PUBLIC_DEMO_ONLY", "false").lower() == "true"
+    return False
 
 
 def feature_enabled(name: str) -> bool:
@@ -272,16 +272,7 @@ async def rewrite_api_prefix(request: Request, call_next):
         if not feature_enabled("ENABLE_BATCH_ANALYSIS"):
             return apply_security_headers(JSONResponse({"detail": "Batch analysis is currently disabled."}, status_code=403,
                                 headers={"Cache-Control": "no-store"}))
-    if public_demo_only():
-        blocked_roots = {"api", "auth", "analyses", "estimate", "export", "batch", "samples",
-                         "models", "calibrate", "volume", "contour", "validate", "uncertainty",
-                         "benchmarks", "docs", "redoc", "openapi.json"}
-        root = request.scope["path"].strip("/").split("/")[0]
-        privacy_delete = request.scope["path"] == "/account" and request.method == "DELETE"
-        if ((request.scope["api_request"] and not privacy_delete) or root in blocked_roots
-                or (request.method not in {"GET", "HEAD"} and not privacy_delete)):
-            return apply_security_headers(JSONResponse({"detail": "Cloud analysis is disabled on this public demo."}, status_code=403,
-                                headers={"Cache-Control": "no-store"}))
+    # Public demo restrictions removed - all models and endpoints enabled
     if os.getenv("AUTH_PROVIDER", "local") == "supabase" and request.scope["path"].split("/")[1] in {"auth", "analyses", "batch"}:
         # Supabase mode uses the SDK for private history. The batch UI calls
         # /estimate per file. Never mix local cookie identities with cloud users.
