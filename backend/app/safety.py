@@ -96,8 +96,10 @@ class UploadLimitMiddleware:
         protected_paths = {"/estimate", "/estimate/video", "/uncertainty", "/validate", "/batch",
                            "/calibrate", "/contour", "/volume", "/volume/shadow", "/export/ply",
                            "/export/report", "/export/pdf", "/account"}
+        guest_allowed = os.getenv("ALLOW_GUEST_ANALYSIS", "true").strip().lower() == "true"
         if (os.getenv("AUTH_PROVIDER", "local") == "supabase" and path in protected_paths
-                and not headers.get(b"authorization", b"")):
+                and not headers.get(b"authorization", b"")
+                and not (guest_allowed and path != "/account")):
             return await self.rejection(scope, "Please log in", 401)(scope, receive, send)
         if path == "/estimate/video" and os.getenv("ENABLE_VIDEO_ANALYSIS", "false").strip().lower() != "true":
             return await self.rejection(scope, "Video analysis is currently disabled.", 403)(scope, receive, send)
