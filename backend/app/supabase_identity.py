@@ -57,8 +57,5 @@ def processing_identity(request: Request):
         return {"id": None, "guest": True, "email": None}
     scheme, _, token = header.partition(" ")
     if scheme.lower() != "bearer" or not token.strip():
-        return {"id": None, "guest": True, "email": None}
-    try:
-        return verify_supabase_token(token.strip())
-    except HTTPException:
-        return {"id": None, "guest": True, "email": None}
+        raise HTTPException(401, "Invalid authorization header")
+    return verify_supabase_token(token.strip())
