@@ -70,7 +70,7 @@ estimator_lock = threading.RLock()
 background_tasks: set[asyncio.Task] = set()
 
 MAX_IMAGE_DIM = 518  # Native Depth Anything V2 patch resolution (37*14=518) for 35% faster inference
-MAX_INFERENCE_WAIT_SECONDS = float(os.getenv("MAX_INFERENCE_WAIT_SECONDS", "10"))
+MAX_INFERENCE_WAIT_SECONDS = float(os.getenv("MAX_INFERENCE_WAIT_SECONDS", "30"))
 INFERENCE_CONCURRENCY = int(os.getenv("INFERENCE_CONCURRENCY", "1"))
 if not 1 <= INFERENCE_CONCURRENCY <= 4 or not 0.1 <= MAX_INFERENCE_WAIT_SECONDS <= 120:
     raise RuntimeError("Inference concurrency and wait settings are outside the allowed range")
@@ -111,13 +111,12 @@ async def limited_inference(function, *args, **kwargs):
 
 
 async def reserve_cloud_analysis(request: Request, user):
-    """Apply shared admission controls to every authenticated compute route."""
+    """Apply shared admission controls to compute routes; guests run without quota reservation."""
     if os.getenv("AUTH_PROVIDER", "local") != "supabase":
         return
-    if not isinstance(user, dict) or not user.get("id"):
-        raise HTTPException(401, "Please log in")
-    await reserve_analysis(request, user["id"])
-    track_task(cleanup_expired_analyses(quota_settings()["retention_days"]))
+    if isinstance(user, dict) and user.get("id"):
+        await reserve_analysis(request, user["id"])
+        track_task(cleanup_expired_analyses(quota_settings()["retention_days"]))
 
 
 async def run_retention_maintenance():
