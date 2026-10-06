@@ -13,7 +13,7 @@ function AuthenticatedApp() {
   if (publicDemoOnly) return <PublicDemoApp key={user?.id || "public"} />;
   if (recovering) return <LoginPage />;
   if (user) return <App key={user.id} />;
-  if (guest) return <PublicDemoApp key="guest" />;
+  if (guest) return <App key="guest" />;
   return <LoginPage />;
 }
 
