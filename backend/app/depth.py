@@ -26,8 +26,7 @@ logger = logging.getLogger(__name__)
 try:
     import torch
     # Utilize full physical CPU cores for fast SIMD/AVX inference
-    cpu_cores = os.cpu_count() or 4
-    torch.set_num_threads(max(1, min(8, cpu_cores)))
+    torch.set_num_threads(int(os.getenv("TORCH_THREADS", "2")))
     if hasattr(torch.backends, "mkldnn"):
         torch.backends.mkldnn.enabled = True
 except ImportError:
@@ -202,15 +201,18 @@ def list_available_models(current_model: Optional[str] = None) -> List[Dict]:
     results = []
     for model_id, info in MODEL_REGISTRY.items():
         supported = info["type"] in {"depth-anything", "midas", "zoedepth", "procedural"}
-        ready = info["type"] == "procedural" or (
-            supported and _model_dependencies_installed(info["type"])
-        )
         cached = _model_weights_cached(model_id, info) if supported else False
         if model_id == current_model and supported:
             ready = cached = True
+        else:
+            ready = info["type"] == "procedural" or (
+                supported and _model_dependencies_installed(info["type"]) and cached
+            )
         unavailable_reason = None
         if not supported:
             unavailable_reason = "Metric3D is not implemented by the installed Transformers model stack."
+        elif not cached and info["type"] != "procedural":
+            unavailable_reason = "Model weights are not pre-cached on this server."
         elif not ready:
             unavailable_reason = "Required backend ML dependencies are not installed."
         entry = {
@@ -354,11 +356,11 @@ class DepthEstimator:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
         try:
-            self.processor = AutoImageProcessor.from_pretrained(hf_id, local_files_only=True)
+            self.processor = AutoImageProcessor.from_pretrained(hf_id, local_files_only=True, use_fast=True)
             self.model = AutoModelForDepthEstimation.from_pretrained(hf_id, local_files_only=True).to(device)
         except Exception:
             # Fetch only the model that the caller explicitly selected.
-            self.processor = AutoImageProcessor.from_pretrained(hf_id)
+            self.processor = AutoImageProcessor.from_pretrained(hf_id, use_fast=True)
             self.model = AutoModelForDepthEstimation.from_pretrained(hf_id).to(device)
 
         self.model.eval()
