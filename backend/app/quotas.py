@@ -28,8 +28,8 @@ def quota_settings() -> dict:
         "user_daily": _positive_int("MAX_USER_DAILY_ANALYSES", 5),
         "ip_minute": _positive_int("MAX_IP_ANALYSES_PER_MINUTE", 5),
         "global_daily": _positive_int("MAX_GLOBAL_DAILY_ANALYSES", 50),
-        "storage_bytes": _positive_int("MAX_USER_STORAGE_MB", 50, maximum=1024 * 1024) * 1024 * 1024,
-        "retention_days": _positive_int("UPLOAD_RETENTION_DAYS", 365, maximum=3650),
+        "storage_bytes": _positive_int("MAX_USER_STORAGE_MB", 20, maximum=1024 * 1024) * 1024 * 1024,
+        "retention_days": _positive_int("UPLOAD_RETENTION_DAYS", 30, maximum=3650),
     }
 
 
@@ -79,8 +79,8 @@ async def _rpc(function: str, payload: dict) -> Any:
         async with httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=3.0)) as client:
             response = await client.post(f"{url}/rest/v1/rpc/{function}", headers=headers, json=payload)
         if response.status_code >= 400:
-            logger.warning("Supabase quota RPC failed with status %s", response.status_code)
-            raise HTTPException(503, "Analysis protection is temporarily unavailable")
+            logger.warning("Supabase quota RPC failed with status %s: %s", response.status_code, response.text)
+            raise HTTPException(503, "please try again")
         if response.status_code == 204:
             return None
         return response.json()
@@ -88,7 +88,7 @@ async def _rpc(function: str, payload: dict) -> Any:
         raise
     except (httpx.HTTPError, ValueError) as exc:
         logger.warning("Supabase quota check unavailable (%s)", type(exc).__name__)
-        raise HTTPException(503, "Analysis protection is temporarily unavailable") from None
+        raise HTTPException(503, "please try again") from None
 
 
 async def reserve_analysis(request: Request, user_id: str) -> dict:
@@ -105,20 +105,20 @@ async def reserve_analysis(request: Request, user_id: str) -> dict:
         "p_retention_days": limits["retention_days"],
     })
     if not isinstance(response, dict):
-        raise HTTPException(503, "Analysis protection is temporarily unavailable")
+        raise HTTPException(503, "please try again")
     if response.get("allowed") is True:
         return response
     code = response.get("code")
     if code == "capacity_reached":
-        raise HTTPException(429, "Daily analysis capacity reached. Please try again tomorrow.",
+        raise HTTPException(429, "daily limit reached",
                             headers={"Retry-After": "3600", "X-Quota-State": "capacity-reached"})
     if code == "daily_limit_reached":
-        raise HTTPException(429, "Your daily analysis limit has been reached. Please try again tomorrow.",
+        raise HTTPException(429, "daily limit reached",
                             headers={"Retry-After": "3600", "X-Quota-State": "daily-limit"})
     if code == "ip_rate_limited":
-        raise HTTPException(429, "Too many analyses from this network. Wait a minute and try again.",
+        raise HTTPException(429, "please try again",
                             headers={"Retry-After": "60", "X-Quota-State": "ip-rate-limit"})
-    raise HTTPException(503, "Analysis protection is temporarily unavailable")
+    raise HTTPException(503, "please try again")
 
 
 async def read_user_quota(user_id: str) -> dict:
@@ -130,7 +130,7 @@ async def read_user_quota(user_id: str) -> dict:
         "p_retention_days": limits["retention_days"],
     })
     if not isinstance(response, dict):
-        raise HTTPException(503, "Analysis protection is temporarily unavailable")
+        raise HTTPException(503, "please try again")
     return response
 
 
