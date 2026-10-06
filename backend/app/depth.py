@@ -201,29 +201,24 @@ def list_available_models(current_model: Optional[str] = None) -> List[Dict]:
     results = []
     for model_id, info in MODEL_REGISTRY.items():
         supported = info["type"] in {"depth-anything", "midas", "zoedepth", "procedural"}
+        ready = info["type"] == "procedural" or (
+            supported and _model_dependencies_installed(info["type"])
+        )
         cached = _model_weights_cached(model_id, info) if supported else False
         if model_id == current_model and supported:
             ready = cached = True
-        else:
-            ready = info["type"] == "procedural" or (
-                supported and _model_dependencies_installed(info["type"]) and cached
-            )
         unavailable_reason = None
         if not supported:
             unavailable_reason = "Metric3D is not implemented by the installed Transformers model stack."
-        elif not cached and info["type"] != "procedural":
-            unavailable_reason = "Model weights are not pre-cached on this server."
         elif not ready:
             unavailable_reason = "Required backend ML dependencies are not installed."
-        entry = {
+        results.append({
             **info,
             "id": model_id,
             "available": ready,
             "weights_cached": cached,
             "unavailable_reason": unavailable_reason,
-        }
-        results.append(entry)
-
+        })
     return results
 
 
