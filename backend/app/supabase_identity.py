@@ -54,9 +54,11 @@ def verify_supabase_token(token):
 def processing_identity(request: Request):
     header = request.headers.get("authorization")
     if not header:
-        raise HTTPException(401, "Please log in")
+        return {"id": None, "guest": True, "email": None}
     scheme, _, token = header.partition(" ")
     if scheme.lower() != "bearer" or not token.strip():
-        raise HTTPException(401, "Invalid authorization header")
-    # A missing, invalid, anonymous, or forged token is never silently downgraded.
-    return verify_supabase_token(token.strip())
+        return {"id": None, "guest": True, "email": None}
+    try:
+        return verify_supabase_token(token.strip())
+    except HTTPException:
+        return {"id": None, "guest": True, "email": None}
